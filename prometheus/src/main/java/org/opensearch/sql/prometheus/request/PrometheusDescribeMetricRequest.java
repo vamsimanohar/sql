@@ -1,0 +1,72 @@
+/*
+ * Copyright OpenSearch Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+
+package org.opensearch.sql.prometheus.request;
+
+import static org.opensearch.sql.utils.Constants.NATIVE_QUERY;
+
+import java.io.IOException;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.HashMap;
+import java.util.Map;
+import org.opensearch.sql.data.type.ExprCoreType;
+import org.opensearch.sql.data.type.ExprType;
+import org.opensearch.sql.prometheus.client.PrometheusClient;
+
+/**
+ * Describe index meta data request.
+ */
+public class PrometheusDescribeMetricRequest {
+
+  private final PrometheusClient prometheusClient;
+
+  private final String metricName;
+
+
+  public PrometheusDescribeMetricRequest(PrometheusClient prometheusClient,
+                                         String metricName) {
+    this.prometheusClient = prometheusClient;
+    this.metricName = metricName;
+  }
+
+  /**
+   * Get the mapping of field and type.
+   *
+   * @return mapping of field and type.
+   */
+  public Map<String, ExprType> getFieldTypes() {
+    Map<String, ExprType> fieldTypes = new HashMap<>();
+
+    String[] labels = AccessController.doPrivileged((PrivilegedAction<String[]>) () -> {
+      if (!metricName.equalsIgnoreCase(NATIVE_QUERY)) {
+        try {
+          return prometheusClient.getLabels(metricName);
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      }
+      return null;
+    });
+    if (labels != null) {
+      for (String label : labels) {
+        fieldTypes.put(label, ExprCoreType.STRING);
+      }
+    }
+    fieldTypes.put("@value", ExprCoreType.DOUBLE);
+    fieldTypes.put("@timestamp", ExprCoreType.TIMESTAMP);
+    fieldTypes.put("metric", ExprCoreType.STRING);
+    return fieldTypes;
+  }
+
+
+  @Override
+  public String toString() {
+    return "OpenSearchDescribeIndexRequest{"
+        + "indexName='" + metricName + '\''
+        + '}';
+  }
+}

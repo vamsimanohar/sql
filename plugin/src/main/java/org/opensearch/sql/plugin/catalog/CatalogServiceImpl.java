@@ -11,10 +11,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.security.PrivilegedExceptionAction;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import okhttp3.OkHttpClient;
 import org.apache.commons.math3.util.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -23,6 +27,12 @@ import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.opensearch.security.SecurityAccess;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
+import org.opensearch.sql.prometheus.client.PrometheusClient;
+import org.opensearch.sql.prometheus.client.PrometheusClientImpl;
+import org.opensearch.sql.prometheus.config.PrometheusConfig;
+import org.opensearch.sql.prometheus.planner.executor.PrometheusExecutionEngine;
+import org.opensearch.sql.prometheus.planner.executor.protector.PrometheusExecutionProtector;
+import org.opensearch.sql.prometheus.storage.PrometheusStorageEngine;
 import org.opensearch.sql.storage.StorageEngine;
 
 
@@ -84,6 +94,11 @@ public class CatalogServiceImpl implements CatalogService {
     return Optional.ofNullable(executionEngineMap.get(catalog));
   }
 
+  @Override
+  public Set<String> getCatalogs() {
+    return storageEngineMap.keySet();
+  }
+
   private <T> T doPrivileged(PrivilegedExceptionAction<T> action) {
     try {
       return SecurityAccess.doPrivileged(action);
@@ -93,12 +108,32 @@ public class CatalogServiceImpl implements CatalogService {
   }
 
   private Pair<StorageEngine, ExecutionEngine> createStorageEngineAndExecutionEngine(
-      JsonNode catalog) {
-    LOG.info("Constructed connector for catalog :: " + catalog.toString());
-    return null;
+      JsonNode catalog) throws URISyntaxException {
+    StorageEngine storageEngine;
+    ExecutionEngine executionEngine;
+    switch (catalog.get("connector").asText()) {
+      case "prometheus":
+        PrometheusClient
+            prometheusClient =
+            new PrometheusClientImpl(new OkHttpClient(), new URI(catalog.get("uri").asText()));
+        PrometheusConfig prometheusConfig = new PrometheusConfig();
+        if (catalog.has("defaultTimeRange")) {
+          prometheusConfig.setDefaultTimeRange(catalog.get("defaultTimeRange").asLong());
+        }
+        storageEngine = new PrometheusStorageEngine(prometheusClient, prometheusConfig);
+        executionEngine = new PrometheusExecutionEngine(prometheusClient,
+            new PrometheusExecutionProtector(
+                new org.opensearch.sql.prometheus.monitor.OpenSearchResourceMonitor(
+                    new org.opensearch.sql.prometheus.monitor.OpenSearchMemoryHealthy())));
+        break;
+      default:
+        throw new IllegalStateException(
+            "Unknown catalog. Please upload the required catalog configuration");
+    }
+    return new Pair<>(storageEngine, executionEngine);
   }
 
-  private void constructConnectors(ArrayNode catalogs) {
+  private void constructConnectors(ArrayNode catalogs) throws URISyntaxException {
     storageEngineMap = new HashMap<>();
     executionEngineMap = new HashMap<>();
     for (JsonNode catalog : catalogs) {
@@ -108,10 +143,8 @@ public class CatalogServiceImpl implements CatalogService {
       }
       Pair<StorageEngine, ExecutionEngine> pair
           = createStorageEngineAndExecutionEngine(catalog);
-      if (pair != null) {
-        storageEngineMap.put(catalogName, pair.getFirst());
-        executionEngineMap.put(catalogName, pair.getSecond());
-      }
+      storageEngineMap.put(catalogName, pair.getFirst());
+      executionEngineMap.put(catalogName, pair.getSecond());
     }
   }
 

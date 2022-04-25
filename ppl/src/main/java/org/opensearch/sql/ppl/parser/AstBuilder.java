@@ -6,6 +6,7 @@
 
 package org.opensearch.sql.ppl.parser;
 
+import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.CatalogNameContext;
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.DedupCommandContext;
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.EvalCommandContext;
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.FieldsCommandContext;
@@ -24,6 +25,7 @@ import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.WhereComma
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -33,10 +35,13 @@ import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.opensearch.sql.ast.expression.Alias;
+import org.opensearch.sql.ast.expression.Argument;
+import org.opensearch.sql.ast.expression.DataType;
 import org.opensearch.sql.ast.expression.Field;
 import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.ast.expression.Map;
+import org.opensearch.sql.ast.expression.QualifiedName;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.AD;
 import org.opensearch.sql.ast.tree.Aggregation;
@@ -52,7 +57,9 @@ import org.opensearch.sql.ast.tree.RareTopN.CommandType;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Sort;
+import org.opensearch.sql.ast.tree.SourceNativeQuery;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
+import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.common.utils.StringUtils;
 import org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser;
 import org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.AdCommandContext;
@@ -70,6 +77,8 @@ import org.opensearch.sql.ppl.utils.ArgumentFactory;
 public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
 
   private final AstExpressionBuilder expressionBuilder;
+
+  private final CatalogService catalogService;
 
   /**
    * PPL query to get original token text. This is necessary because token.getText() returns
@@ -161,10 +170,10 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
         Optional.ofNullable(ctx.statsByClause())
             .map(OpenSearchPPLParser.StatsByClauseContext::fieldList)
             .map(expr -> expr.fieldExpression().stream()
-                        .map(groupCtx ->
-                            (UnresolvedExpression) new Alias(getTextInQuery(groupCtx),
-                                internalVisitExpression(groupCtx)))
-                        .collect(Collectors.toList()))
+                .map(groupCtx ->
+                    (UnresolvedExpression) new Alias(getTextInQuery(groupCtx),
+                        internalVisitExpression(groupCtx)))
+                .collect(Collectors.toList()))
             .orElse(Collections.emptyList());
 
     UnresolvedExpression span =
@@ -286,9 +295,56 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
    */
   @Override
   public UnresolvedPlan visitFromClause(FromClauseContext ctx) {
-    return new Relation(ctx.tableSource()
-        .stream().map(this::internalVisitExpression)
-        .collect(Collectors.toList()));
+
+    if (ctx.tableSource().get(0).qualifiedName() != null) {
+      List<UnresolvedExpression> tableName = ctx.tableSource()
+          .stream()
+          .map(OpenSearchPPLParser.TableSourceContext::qualifiedName)
+          .map(this::internalVisitExpression)
+          .collect(Collectors.toList());
+      CatalogNameContext catalogNameContext = ctx.tableSource()
+          .stream()
+          .findFirst()
+          .get().catalogName();
+      if (catalogNameContext != null
+          && catalogService.getCatalogs().contains(catalogNameContext.getText())) {
+        UnresolvedExpression catalogName = internalVisitExpression(catalogNameContext);
+        return new Relation(tableName, catalogName);
+      } else {
+        if (catalogNameContext != null) {
+          List<String> actualTableName = new ArrayList<>();
+          actualTableName.add(StringUtils.unquoteText(catalogNameContext.getText()) + ".");
+          actualTableName.addAll(ctx.tableSource()
+              .stream()
+              .map(OpenSearchPPLParser.TableSourceContext::qualifiedName)
+              .map(OpenSearchPPLParser.QualifiedNameContext::getText)
+              .map(StringUtils::unquoteText)
+              .collect(Collectors.toList()));
+          return new Relation(new QualifiedName(actualTableName));
+        } else {
+          return new Relation(tableName);
+        }
+      }
+    } else if (ctx.tableSource().get(0).promQLFunction() != null) {
+      OpenSearchPPLParser.TableSourceContext tableSourceContext = ctx.tableSource().stream()
+          .findFirst()
+          .get();
+      OpenSearchPPLParser.PromQLFunctionContext promQLFunctionContext =
+          tableSourceContext.promQLFunction();
+      ImmutableList.Builder<Argument> builder = ImmutableList.builder();
+      builder.add(new Argument("query",
+          new Literal(StringUtils.unquoteText(promQLFunctionContext.promQLQuery().getText()),
+              DataType.STRING)));
+      promQLFunctionContext.promQLArg()
+          .forEach(v -> builder.add(new Argument(v.promQLArgName().getText().toLowerCase(),
+              new Literal(StringUtils.unquoteText(v.promQLArgValue().getText()), DataType.LONG))));
+      return new SourceNativeQuery(internalVisitExpression(tableSourceContext.catalogName()),
+          builder.build());
+    } else {
+      return new Relation(ctx.tableSource()
+          .stream().map(this::internalVisitExpression)
+          .collect(Collectors.toList()));
+    }
   }
 
   /**
@@ -316,10 +372,10 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
   public UnresolvedPlan visitKmeansCommand(KmeansCommandContext ctx) {
     ImmutableMap.Builder<String, Literal> builder = ImmutableMap.builder();
     ctx.kmeansParameter()
-            .forEach(x -> {
-              builder.put(x.children.get(0).toString(),
-                      (Literal) internalVisitExpression(x.children.get(2)));
-            });
+        .forEach(x -> {
+          builder.put(x.children.get(0).toString(),
+              (Literal) internalVisitExpression(x.children.get(2)));
+        });
     return new Kmeans(builder.build());
   }
 
@@ -330,10 +386,10 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
   public UnresolvedPlan visitAdCommand(AdCommandContext ctx) {
     ImmutableMap.Builder<String, Literal> builder = ImmutableMap.builder();
     ctx.adParameter()
-            .forEach(x -> {
-              builder.put(x.children.get(0).toString(),
-                      (Literal) internalVisitExpression(x.children.get(2)));
-            });
+        .forEach(x -> {
+          builder.put(x.children.get(0).toString(),
+              (Literal) internalVisitExpression(x.children.get(2)));
+        });
 
     return new AD(builder.build());
   }

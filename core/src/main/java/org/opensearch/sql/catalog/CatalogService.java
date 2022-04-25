@@ -1,6 +1,7 @@
 package org.opensearch.sql.catalog;
 
 import java.util.Optional;
+import java.util.Set;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.storage.StorageEngine;
 
@@ -16,5 +17,7 @@ public interface CatalogService {
   Optional<StorageEngine> getStorageEngine(String catalog);
   
   Optional<ExecutionEngine> getExecutionEngine(String catalog);
+
+  Set<String> getCatalogs();
 
 }

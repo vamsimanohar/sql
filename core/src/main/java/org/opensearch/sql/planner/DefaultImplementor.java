@@ -19,6 +19,7 @@ import org.opensearch.sql.planner.logical.LogicalRelation;
 import org.opensearch.sql.planner.logical.LogicalRemove;
 import org.opensearch.sql.planner.logical.LogicalRename;
 import org.opensearch.sql.planner.logical.LogicalSort;
+import org.opensearch.sql.planner.logical.LogicalSourceNativeQuery;
 import org.opensearch.sql.planner.logical.LogicalValues;
 import org.opensearch.sql.planner.logical.LogicalWindow;
 import org.opensearch.sql.planner.physical.AggregationOperator;
@@ -43,7 +44,7 @@ import org.opensearch.sql.planner.physical.WindowOperator;
  * a storage has the flexibility to override visitFilter and visitRelation to push down filtering
  * operation and return a single physical index scan operator.
  *
- * @param <C>   context type
+ * @param <C> context type
  */
 public class DefaultImplementor<C> extends LogicalPlanNodeVisitor<PhysicalPlan, C> {
 
@@ -127,6 +128,12 @@ public class DefaultImplementor<C> extends LogicalPlanNodeVisitor<PhysicalPlan, 
   public PhysicalPlan visitRelation(LogicalRelation node, C context) {
     throw new UnsupportedOperationException("Storage engine is responsible for "
         + "implementing and optimizing logical plan with relation involved");
+  }
+
+  @Override
+  public PhysicalPlan visitNativeQuery(LogicalSourceNativeQuery node, C context) {
+    throw new UnsupportedOperationException("Storage engine is responsible for "
+        + "implementing and optimizing logical plan with native query involved");
   }
 
   protected PhysicalPlan visitChild(LogicalPlan node, C context) {

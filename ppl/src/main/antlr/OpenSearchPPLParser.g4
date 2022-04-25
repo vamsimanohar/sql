@@ -234,8 +234,35 @@ multiFieldRelevanceFunction
 
 /** tables */
 tableSource
-    : qualifiedName
+    : catalogName DOT promQLFunction
+    | (catalogName DOT)? qualifiedName
     | ID_DATE_SUFFIX
+    ;
+
+// Field is a single column
+promQLFunction
+    : promQLFunctionName LT_PRTHS
+        field = promQLQuery (COMMA promQLArg)* RT_PRTHS
+    ;
+
+promQLFunctionName
+    : PROMQL
+    ;
+
+promQLQuery
+    : BQUOTA_STRING
+    ;
+
+promQLArg
+    : promQLArgName EQUAL promQLArgValue
+    ;
+
+promQLArgName
+    : STARTTIME | ENDTIME | STEP
+    ;
+
+promQLArgValue
+    : INTEGER_LITERAL
     ;
 
 /** fields */
@@ -446,6 +473,10 @@ valueList
 
 qualifiedName
     : ident (DOT ident)*                             #identsAsQualifiedName
+    ;
+
+catalogName
+    : ident                                         #identAsCatalogName
     ;
 
 wcQualifiedName

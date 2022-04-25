@@ -57,8 +57,9 @@ public class TypeEnvironment implements Environment<Symbol, ExprType> {
 
   /**
    * Resolve all fields in the current environment.
-   * @param namespace     a namespace
-   * @return              all symbols in the namespace
+   *
+   * @param namespace a namespace
+   * @return all symbols in the namespace
    */
   public Map<String, ExprType> lookupAllFields(Namespace namespace) {
     Map<String, ExprType> result = new LinkedHashMap<>();

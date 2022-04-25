@@ -53,7 +53,8 @@ public class NamedExpression implements Expression {
 
   /**
    * Get expression name using name or its alias (if it's present).
-   * @return  expression name
+   *
+   * @return expression name
    */
   public String getNameOrAlias() {
     return Strings.isNullOrEmpty(alias) ? name : alias;

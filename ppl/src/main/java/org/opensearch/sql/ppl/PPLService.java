@@ -14,7 +14,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.sql.analysis.AnalysisContext;
 import org.opensearch.sql.analysis.Analyzer;
+import org.opensearch.sql.analysis.ExpressionAnalyzer;
 import org.opensearch.sql.ast.tree.Relation;
+import org.opensearch.sql.ast.tree.SourceNativeQuery;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.common.response.ResponseListener;
@@ -38,8 +40,6 @@ import org.opensearch.sql.storage.StorageEngine;
 @RequiredArgsConstructor
 public class PPLService {
   private final PPLSyntaxParser parser;
-
-  private final Analyzer analyzer;
 
   private final StorageEngine openSearchStorageEngine;
 
@@ -92,7 +92,7 @@ public class PPLService {
     // 1.Parse query and convert parse tree (CST) to abstract syntax tree (AST)
     ParseTree cst = parser.analyzeSyntax(request.getRequest());
     UnresolvedPlan ast = cst.accept(
-        new AstBuilder(new AstExpressionBuilder(), request.getRequest()));
+        new AstBuilder(new AstExpressionBuilder(), catalogService, request.getRequest()));
     LOG.info("[{}] Incoming request {}", LogUtils.getRequestId(), anonymizer.anonymizeData(ast));
 
     setConnector(ast);
@@ -100,8 +100,10 @@ public class PPLService {
         catalogService.getStorageEngine(connector).orElse(openSearchStorageEngine);
 
     // 2.Analyze abstract syntax to generate logical plan
-    LogicalPlan logicalPlan = analyzer.analyze(UnresolvedPlanHelper.addSelectAll(ast),
-        new AnalysisContext());
+    LogicalPlan logicalPlan =
+        new Analyzer(new ExpressionAnalyzer(repository), storageEngine).analyze(
+            UnresolvedPlanHelper.addSelectAll(ast),
+            new AnalysisContext());
 
     // 3.Generate optimal physical plan from logical plan
     return new Planner(storageEngine, LogicalPlanOptimizer.create(new DSL(repository)))
@@ -111,14 +113,11 @@ public class PPLService {
   private void setConnector(UnresolvedPlan unresolvedPlan) {
     while (unresolvedPlan != null) {
       if (unresolvedPlan instanceof Relation) {
-        String tableName = ((Relation) unresolvedPlan).getTableName();
-        String[] split = tableName.split("\\.");
-        if (split.length > 1) {
-          this.connector = split[0];
-          return;
-        } else {
-          return;
-        }
+        connector = ((Relation) unresolvedPlan).getCatalogName();
+        break;
+      } else if (unresolvedPlan instanceof SourceNativeQuery) {
+        connector = ((SourceNativeQuery) unresolvedPlan).getCatalogName();
+        break;
       }
       unresolvedPlan = (UnresolvedPlan) unresolvedPlan.getChild().get(0);
     }

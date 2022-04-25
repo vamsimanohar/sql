@@ -207,6 +207,10 @@ ROUND:                              'ROUND';
 SIGN:                               'SIGN';
 SQRT:                               'SQRT';
 TRUNCATE:                           'TRUNCATE';
+PROMQL:                             'PROMQL';
+STARTTIME:                          'STARTTIME';
+ENDTIME:                            'ENDTIME';
+STEP:                               'STEP';
 
 // TRIGONOMETRIC FUNCTIONS
 ACOS:                               'ACOS';

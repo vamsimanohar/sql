@@ -7,12 +7,14 @@
 package org.opensearch.sql.planner;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
+import static org.opensearch.sql.utils.Constants.NATIVE_QUERY;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.opensearch.sql.planner.logical.LogicalPlan;
 import org.opensearch.sql.planner.logical.LogicalPlanNodeVisitor;
 import org.opensearch.sql.planner.logical.LogicalRelation;
+import org.opensearch.sql.planner.logical.LogicalSourceNativeQuery;
 import org.opensearch.sql.planner.optimizer.LogicalPlanOptimizer;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 import org.opensearch.sql.storage.StorageEngine;
@@ -66,6 +68,12 @@ public class Planner {
       public String visitRelation(LogicalRelation node, Object context) {
         return node.getRelationName();
       }
+
+      @Override
+      public String visitNativeQuery(LogicalSourceNativeQuery node, Object context) {
+        return NATIVE_QUERY;
+      }
+
     }, null);
   }
 

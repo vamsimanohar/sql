@@ -22,6 +22,7 @@ import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.DistinctCo
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.EvalClauseContext;
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.EvalFunctionCallContext;
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.FieldExpressionContext;
+import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.IdentAsCatalogNameContext;
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.IdentsAsQualifiedNameContext;
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.IdentsAsWildcardQualifiedNameContext;
 import static org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser.InExprContext;
@@ -274,6 +275,12 @@ public class AstExpressionBuilder extends OpenSearchPPLParserBaseVisitor<Unresol
     return visitIdentifiers(Arrays.asList(ctx));
   }
 
+  @Override
+  public UnresolvedExpression visitIdentAsCatalogName(
+      IdentAsCatalogNameContext ctx) {
+    return visitIdentifiers(Arrays.asList(ctx));
+  }
+
   /**
    * Literal and value.
    */
@@ -331,6 +338,12 @@ public class AstExpressionBuilder extends OpenSearchPPLParserBaseVisitor<Unresol
     return new Span(visit(ctx.fieldExpression()), visit(ctx.value), SpanUnit.of(unit));
   }
 
+  @Override
+  public UnresolvedExpression visitPromQLFunction(
+      OpenSearchPPLParser.PromQLFunctionContext context) {
+    return new Function(context.promQLFunctionName().getText(), promQlArguments(context));
+  }
+
   private QualifiedName visitIdentifiers(List<? extends ParserRuleContext> ctx) {
     return new QualifiedName(
         ctx.stream()
@@ -372,6 +385,17 @@ public class AstExpressionBuilder extends OpenSearchPPLParserBaseVisitor<Unresol
     ctx.relevanceArg().forEach(v -> builder.add(new UnresolvedArgument(
         v.relevanceArgName().getText().toLowerCase(), new Literal(StringUtils.unquoteText(
         v.relevanceArgValue().getText()), DataType.STRING))));
+    return builder.build();
+  }
+
+  private List<UnresolvedExpression> promQlArguments(
+      OpenSearchPPLParser.PromQLFunctionContext ctx) {
+    ImmutableList.Builder<UnresolvedExpression> builder = ImmutableList.builder();
+    builder.add(new UnresolvedArgument("query",
+        new Literal(StringUtils.unquoteText(ctx.promQLQuery().getText()), DataType.STRING)));
+    ctx.promQLArg()
+        .forEach(v -> builder.add(new UnresolvedArgument(v.promQLArgName().getText().toLowerCase(),
+            new Literal(StringUtils.unquoteText(v.promQLArgValue().getText()), DataType.LONG))));
     return builder.build();
   }
 }

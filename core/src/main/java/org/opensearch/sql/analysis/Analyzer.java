@@ -11,6 +11,7 @@ import static org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_LAST;
 import static org.opensearch.sql.ast.tree.Sort.SortOrder.ASC;
 import static org.opensearch.sql.ast.tree.Sort.SortOrder.DESC;
 import static org.opensearch.sql.data.type.ExprCoreType.STRUCT;
+import static org.opensearch.sql.utils.Constants.NATIVE_QUERY;
 import static org.opensearch.sql.utils.MLCommonsConstants.RCF_ANOMALOUS;
 import static org.opensearch.sql.utils.MLCommonsConstants.RCF_ANOMALY_GRADE;
 import static org.opensearch.sql.utils.MLCommonsConstants.RCF_SCORE;
@@ -53,6 +54,7 @@ import org.opensearch.sql.ast.tree.RelationSubquery;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Sort;
 import org.opensearch.sql.ast.tree.Sort.SortOption;
+import org.opensearch.sql.ast.tree.SourceNativeQuery;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.ast.tree.Values;
 import org.opensearch.sql.data.model.ExprMissingValue;
@@ -80,6 +82,7 @@ import org.opensearch.sql.planner.logical.LogicalRelation;
 import org.opensearch.sql.planner.logical.LogicalRemove;
 import org.opensearch.sql.planner.logical.LogicalRename;
 import org.opensearch.sql.planner.logical.LogicalSort;
+import org.opensearch.sql.planner.logical.LogicalSourceNativeQuery;
 import org.opensearch.sql.planner.logical.LogicalValues;
 import org.opensearch.sql.storage.StorageEngine;
 import org.opensearch.sql.storage.Table;
@@ -126,7 +129,23 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
     // can be removed when analyzing qualified name. The value (expr type) here doesn't matter.
     curEnv.define(new Symbol(Namespace.INDEX_NAME, node.getTableNameOrAlias()), STRUCT);
 
-    return new LogicalRelation(node.getTableName());
+    return new LogicalRelation(node.getTableName(), node.getCatalogName());
+  }
+
+  @Override
+  public LogicalPlan visitSourceNativeQuery(SourceNativeQuery node, AnalysisContext context) {
+    context.push();
+    TypeEnvironment curEnv = context.peek();
+    Table table = storageEngine.getTable(NATIVE_QUERY);
+    table.getFieldTypes().forEach((k, v) -> curEnv.define(new Symbol(Namespace.FIELD_NAME, k), v));
+
+    // Put index name or its alias in index namespace on type environment so qualifier
+    // can be removed when analyzing qualified name. The value (expr type) here doesn't matter.
+    curEnv.define(new Symbol(Namespace.INDEX_NAME, NATIVE_QUERY), STRUCT);
+    List<Argument> argumentList = node.getArgExprList();
+    java.util.Map<String, Literal> argumentMap = argumentList.stream()
+        .collect(Collectors.toMap(Argument::getArgName, Argument::getValue));
+    return new LogicalSourceNativeQuery(node.getCatalogName(), argumentMap);
   }
 
   @Override

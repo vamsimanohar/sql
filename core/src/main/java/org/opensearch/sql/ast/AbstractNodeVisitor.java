@@ -48,6 +48,7 @@ import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.RelationSubquery;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Sort;
+import org.opensearch.sql.ast.tree.SourceNativeQuery;
 import org.opensearch.sql.ast.tree.Values;
 
 /**
@@ -61,7 +62,8 @@ public abstract class AbstractNodeVisitor<T, C> {
 
   /**
    * Visit child node.
-   * @param node {@link Node}
+   *
+   * @param node    {@link Node}
    * @param context Context
    * @return Return Type.
    */
@@ -84,6 +86,10 @@ public abstract class AbstractNodeVisitor<T, C> {
   }
 
   public T visitRelation(Relation node, C context) {
+    return visitChildren(node, context);
+  }
+
+  public T visitSourceNativeQuery(SourceNativeQuery node, C context) {
     return visitChildren(node, context);
   }
 

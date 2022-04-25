@@ -22,6 +22,10 @@ public abstract class LogicalPlanNodeVisitor<R, C> {
     return visitNode(plan, context);
   }
 
+  public R visitNativeQuery(LogicalSourceNativeQuery plan, C context) {
+    return visitNode(plan, context);
+  }
+
   public R visitFilter(LogicalFilter plan, C context) {
     return visitNode(plan, context);
   }

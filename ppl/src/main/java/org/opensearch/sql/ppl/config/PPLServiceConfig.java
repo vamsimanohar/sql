@@ -37,14 +37,9 @@ public class PPLServiceConfig {
   private BuiltinFunctionRepository functionRepository;
 
   @Bean
-  public Analyzer analyzer() {
-    return new Analyzer(new ExpressionAnalyzer(functionRepository), storageEngine);
-  }
-
-  @Bean
   public PPLService pplService() {
-    return new PPLService(new PPLSyntaxParser(), analyzer(), storageEngine, executionEngine,
-        functionRepository, catalogService);
+    return new PPLService(new PPLSyntaxParser(), storageEngine, executionEngine,
+            functionRepository, catalogService);
   }
 
 }
