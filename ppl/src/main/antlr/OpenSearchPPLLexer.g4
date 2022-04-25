@@ -201,6 +201,7 @@ ROUND:                              'ROUND';
 SIGN:                               'SIGN';
 SQRT:                               'SQRT';
 TRUNCATE:                           'TRUNCATE';
+PROMQL:                             'PROMQL';
 
 // TRIGONOMETRIC FUNCTIONS
 ACOS:                               'ACOS';

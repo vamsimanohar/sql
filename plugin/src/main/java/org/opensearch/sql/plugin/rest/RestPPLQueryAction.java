@@ -14,23 +14,32 @@ import static org.opensearch.sql.protocol.response.format.JsonResponseFormatter.
 
 import com.google.common.collect.ImmutableList;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.security.PrivilegedExceptionAction;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import okhttp3.OkHttpClient;
+import org.apache.commons.math3.util.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.json.JSONObject;
+import org.opensearch.action.search.SearchRequestBuilder;
 import org.opensearch.client.node.NodeClient;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.index.IndexNotFoundException;
+import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.BytesRestResponse;
 import org.opensearch.rest.RestChannel;
 import org.opensearch.rest.RestController;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestStatus;
+import org.opensearch.search.SearchHit;
+import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.common.setting.Settings;
@@ -38,16 +47,30 @@ import org.opensearch.sql.common.utils.LogUtils;
 import org.opensearch.sql.exception.ExpressionEvaluationException;
 import org.opensearch.sql.exception.QueryEngineException;
 import org.opensearch.sql.exception.SemanticCheckException;
+import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.executor.ExecutionEngine.ExplainResponse;
 import org.opensearch.sql.executor.ExecutionEngine.QueryResponse;
 import org.opensearch.sql.legacy.metrics.MetricName;
 import org.opensearch.sql.legacy.metrics.Metrics;
+import org.opensearch.sql.opensearch.client.OpenSearchClient;
+import org.opensearch.sql.opensearch.client.OpenSearchNodeClient;
+import org.opensearch.sql.opensearch.executor.OpenSearchExecutionEngine;
+import org.opensearch.sql.opensearch.executor.protector.OpenSearchExecutionProtector;
+import org.opensearch.sql.opensearch.monitor.OpenSearchMemoryHealthy;
+import org.opensearch.sql.opensearch.monitor.OpenSearchResourceMonitor;
 import org.opensearch.sql.opensearch.response.error.ErrorMessageFactory;
 import org.opensearch.sql.opensearch.security.SecurityAccess;
+import org.opensearch.sql.opensearch.storage.OpenSearchStorageEngine;
 import org.opensearch.sql.plugin.request.PPLQueryRequestFactory;
 import org.opensearch.sql.ppl.PPLService;
+import org.opensearch.sql.plugin.catalog.PPLCatalogServiceImpl;
 import org.opensearch.sql.ppl.config.PPLServiceConfig;
 import org.opensearch.sql.ppl.domain.PPLQueryRequest;
+import org.opensearch.sql.prometheus.client.PrometheusClient;
+import org.opensearch.sql.prometheus.client.PrometheusClientImpl;
+import org.opensearch.sql.prometheus.planner.executor.PrometheusExecutionEngine;
+import org.opensearch.sql.prometheus.planner.executor.protector.PrometheusExecutionProtector;
+import org.opensearch.sql.prometheus.storage.PrometheusStorageEngine;
 import org.opensearch.sql.protocol.response.QueryResult;
 import org.opensearch.sql.protocol.response.format.CsvResponseFormatter;
 import org.opensearch.sql.protocol.response.format.Format;
@@ -56,6 +79,7 @@ import org.opensearch.sql.protocol.response.format.RawResponseFormatter;
 import org.opensearch.sql.protocol.response.format.ResponseFormatter;
 import org.opensearch.sql.protocol.response.format.SimpleJsonResponseFormatter;
 import org.opensearch.sql.protocol.response.format.VisualizationResponseFormatter;
+import org.opensearch.sql.storage.StorageEngine;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 public class RestPPLQueryAction extends BaseRestHandler {
@@ -71,12 +95,17 @@ public class RestPPLQueryAction extends BaseRestHandler {
    */
   private final ClusterService clusterService;
 
+  private final CatalogService catalogService;
+
+  private final AtomicBoolean isCatalogRegistrationDone = new AtomicBoolean();
+
   /**
    * Settings required by been initialization.
    */
   private final Settings pluginSettings;
 
   private final Supplier<Boolean> pplEnabled;
+
 
   /**
    * Constructor of RestPPLQueryAction.
@@ -90,6 +119,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
     this.pplEnabled =
         () -> MULTI_ALLOW_EXPLICIT_INDEX.get(clusterSettings)
             && (Boolean) pluginSettings.getSettingValue(Settings.Key.PPL_ENABLED);
+    this.catalogService = new PPLCatalogServiceImpl();
   }
 
   @Override
@@ -126,13 +156,11 @@ public class RestPPLQueryAction extends BaseRestHandler {
     Metrics.getInstance().getNumericalMetric(MetricName.PPL_REQ_COUNT_TOTAL).increment();
 
     LogUtils.addRequestId();
-
     if (!pplEnabled.get()) {
       return channel -> reportError(channel, new IllegalAccessException(
           "Either plugins.ppl.enabled or rest.action.multi.allow_explicit_index setting is false"
       ), BAD_REQUEST);
     }
-
     PPLService pplService = createPPLService(nodeClient);
     PPLQueryRequest pplRequest = PPLQueryRequestFactory.getPPLRequest(request);
 
@@ -140,6 +168,55 @@ public class RestPPLQueryAction extends BaseRestHandler {
       return channel -> pplService.explain(pplRequest, createExplainResponseListener(channel));
     }
     return channel -> pplService.execute(pplRequest, createListener(channel, pplRequest));
+  }
+
+  private void registerCatalogs(NodeClient nodeClient) {
+    if(isCatalogRegistrationDone.get())
+      return;
+    if(isCatalogRegistrationDone.compareAndSet(false, true)) {
+      try {
+        SearchRequestBuilder searchRequestBuilder = nodeClient.prepareSearch(".catalog")
+                .setQuery(QueryBuilders.matchAllQuery());
+        SearchHit[] hits = searchRequestBuilder.get().getHits().getHits();
+        List<JSONObject> catalogs = Arrays.stream(hits).map(SearchHit::getSourceAsMap).map(JSONObject::new).collect(Collectors.toList());
+        catalogs.add(new JSONObject().put("name", "opensearch").put("connector", "opensearch"));
+        Map<String, StorageEngine> storageEngineMap = new HashMap<>();
+        Map<String, ExecutionEngine> executionEngineMap = new HashMap<>();
+        for (JSONObject catalog : catalogs) {
+          Pair<StorageEngine, ExecutionEngine> pair = createStorageEngineAndExecutionEngine(catalog, nodeClient);
+          storageEngineMap.put(catalog.getString("name"), pair.getFirst());
+          executionEngineMap.put(catalog.getString("name"), pair.getSecond());
+        }
+        this.catalogService.registerCatalogs(storageEngineMap, executionEngineMap);
+      }
+      catch (Throwable e) {
+        isCatalogRegistrationDone.set(false);
+      }
+    }
+  }
+
+  private Pair<StorageEngine, ExecutionEngine> createStorageEngineAndExecutionEngine(JSONObject catalog, NodeClient nodeClient) throws URISyntaxException {
+    StorageEngine storageEngine = null;
+    ExecutionEngine executionEngine = null;
+    switch (catalog.getString("connector")) {
+      case "prometheus":
+        PrometheusClient prometheusClient = new PrometheusClientImpl(new OkHttpClient(), new URI(catalog.getString("uri")));
+        storageEngine = new PrometheusStorageEngine(prometheusClient, pluginSettings);
+        executionEngine = new PrometheusExecutionEngine(prometheusClient,
+                new PrometheusExecutionProtector(
+                        new org.opensearch.sql.prometheus.monitor.OpenSearchResourceMonitor(pluginSettings,
+                                new org.opensearch.sql.prometheus.monitor.OpenSearchMemoryHealthy())));
+        break;
+      case "opensearch":
+        OpenSearchClient openSearchClient = new OpenSearchNodeClient(clusterService, nodeClient);
+        storageEngine = new OpenSearchStorageEngine(openSearchClient, pluginSettings);
+        executionEngine = new OpenSearchExecutionEngine(openSearchClient,
+                new OpenSearchExecutionProtector(
+                        new OpenSearchResourceMonitor(pluginSettings,
+                                new OpenSearchMemoryHealthy())));
+        break;
+    }
+    return new Pair<>(storageEngine, executionEngine);
   }
 
   /**
@@ -156,11 +233,12 @@ public class RestPPLQueryAction extends BaseRestHandler {
    */
   private PPLService createPPLService(NodeClient client) {
     return doPrivileged(() -> {
+      registerCatalogs(client);
       AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
       context.registerBean(ClusterService.class, () -> clusterService);
       context.registerBean(NodeClient.class, () -> client);
       context.registerBean(Settings.class, () -> pluginSettings);
-      context.register(OpenSearchPluginConfig.class);
+      context.registerBean(CatalogService.class,() -> catalogService);
       context.register(PPLServiceConfig.class);
       context.refresh();
       return context.getBean(PPLService.class);
@@ -256,4 +334,5 @@ public class RestPPLQueryAction extends BaseRestHandler {
         || e instanceof QueryEngineException
         || e instanceof SyntaxCheckException;
   }
+
 }

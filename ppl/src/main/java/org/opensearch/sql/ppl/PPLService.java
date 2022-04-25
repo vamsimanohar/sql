@@ -14,10 +14,12 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.sql.analysis.AnalysisContext;
 import org.opensearch.sql.analysis.Analyzer;
+import org.opensearch.sql.analysis.ExpressionAnalyzer;
+import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
+import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.common.utils.LogUtils;
-import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.executor.ExecutionEngine.ExplainResponse;
 import org.opensearch.sql.expression.DSL;
 import org.opensearch.sql.expression.function.BuiltinFunctionRepository;
@@ -37,15 +39,13 @@ import org.opensearch.sql.storage.StorageEngine;
 public class PPLService {
   private final PPLSyntaxParser parser;
 
-  private final Analyzer analyzer;
-
-  private final StorageEngine storageEngine;
-
-  private final ExecutionEngine executionEngine;
+  private final CatalogService catalogService;
 
   private final BuiltinFunctionRepository repository;
 
   private final PPLQueryDataAnonymizer anonymizer = new PPLQueryDataAnonymizer();
+
+  private String connector = "opensearch";
 
   private static final Logger LOG = LogManager.getLogger();
 
@@ -57,7 +57,7 @@ public class PPLService {
    */
   public void execute(PPLQueryRequest request, ResponseListener<QueryResponse> listener) {
     try {
-      executionEngine.execute(plan(request), listener);
+      catalogService.getExecutionEngine(connector).execute(plan(request), listener);
     } catch (Exception e) {
       listener.onFailure(e);
     }
@@ -72,7 +72,7 @@ public class PPLService {
    */
   public void explain(PPLQueryRequest request, ResponseListener<ExplainResponse> listener) {
     try {
-      executionEngine.explain(plan(request), listener);
+      catalogService.getExecutionEngine(connector).explain(plan(request), listener);
     } catch (Exception e) {
       listener.onFailure(e);
     }
@@ -83,16 +83,35 @@ public class PPLService {
     ParseTree cst = parser.analyzeSyntax(request.getRequest());
     UnresolvedPlan ast = cst.accept(
         new AstBuilder(new AstExpressionBuilder(), request.getRequest()));
-
+    setConnector(ast);
     LOG.info("[{}] Incoming request {}", LogUtils.getRequestId(), anonymizer.anonymizeData(ast));
 
+    StorageEngine storageEngine = catalogService.getStorageEngine(connector);
+
     // 2.Analyze abstract syntax to generate logical plan
-    LogicalPlan logicalPlan = analyzer.analyze(UnresolvedPlanHelper.addSelectAll(ast),
+    LogicalPlan logicalPlan = new Analyzer(new ExpressionAnalyzer(repository), storageEngine).analyze(UnresolvedPlanHelper.addSelectAll(ast),
         new AnalysisContext());
 
     // 3.Generate optimal physical plan from logical plan
     return new Planner(storageEngine, LogicalPlanOptimizer.create(new DSL(repository)))
         .plan(logicalPlan);
+  }
+
+  private void setConnector(UnresolvedPlan unresolvedPlan) {
+    while(unresolvedPlan != null) {
+      if(unresolvedPlan instanceof Relation) {
+        String tableName =  ((Relation) unresolvedPlan).getTableName();
+        String[] split = tableName.split("\\.");
+        if(split.length > 1) {
+          this.connector =  split[0];
+          return;
+        }
+        else {
+          return;
+        }
+      }
+      unresolvedPlan = (UnresolvedPlan) unresolvedPlan.getChild().get(0);
+    }
   }
 
 }

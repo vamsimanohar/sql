@@ -15,6 +15,8 @@ import org.opensearch.sql.data.model.ExprValue;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.expression.env.Environment;
 
+import javax.naming.Name;
+
 /**
  * Named expression that represents expression with name.
  * Please see more details in associated unresolved expression operator
@@ -40,6 +42,24 @@ public class NamedExpression implements Expression {
    * Optional alias.
    */
   private String alias;
+
+  /**
+   * New attribute to derive if it needs to be projected.
+   */
+  private Boolean isColumn = false;
+
+
+  public NamedExpression(String name, Expression delegated, String alias) {
+    this.name = name;
+    this.delegated = delegated;
+    this.alias = alias;
+  }
+
+  public NamedExpression(String name, Expression delegated, Boolean isColumn) {
+    this.name = name;
+    this.delegated = delegated;
+    this.isColumn = isColumn;
+  }
 
   @Override
   public ExprValue valueOf(Environment<Expression, ExprValue> valueEnv) {

@@ -36,6 +36,14 @@ public class SymbolTable {
   private Map<Namespace, LinkedHashMap<String, ExprType>> orderedTable =
       new EnumMap<>(Namespace.class);
 
+
+  /**
+   * Two-dimension hash table to manage symbols with type in different namespace.
+   */
+  private Map<Namespace, NavigableMap<String, Boolean>> isTableColumn =
+          new EnumMap<>(Namespace.class);
+
+
   /**
    * Store symbol with the type. Create new map for namespace for the first time.
    *
@@ -52,6 +60,11 @@ public class SymbolTable {
         symbol.getNamespace(),
         ns -> new LinkedHashMap<>()
     ).put(symbol.getName(), type);
+
+    isTableColumn.computeIfAbsent(
+            symbol.getNamespace(),
+            ns -> new TreeMap<>()
+    ).put(symbol.getName(), symbol.getIsTableColumn());
   }
 
   /**
@@ -71,6 +84,13 @@ public class SymbolTable {
           v.remove(symbol.getName());
           return v;
         }
+    );
+    isTableColumn.computeIfPresent(
+            symbol.getNamespace(),
+            (k, v) -> {
+              v.remove(symbol.getName());
+              return v;
+            }
     );
   }
 
@@ -136,5 +156,11 @@ public class SymbolTable {
    */
   public boolean isEmpty(Namespace namespace) {
     return tableByNamespace.getOrDefault(namespace, emptyNavigableMap()).isEmpty();
+  }
+
+  public boolean isColumn(Namespace namespace, String columnName) {
+    final NavigableMap<String, Boolean> allSymbols =
+            isTableColumn.getOrDefault(namespace, new TreeMap<>());
+    return allSymbols.get(columnName);
   }
 }
