@@ -93,8 +93,8 @@ public class RestPPLQueryAction extends BaseRestHandler {
     this.clusterService = clusterService;
     this.pluginSettings = pluginSettings;
     this.pplEnabled =
-        () -> MULTI_ALLOW_EXPLICIT_INDEX.get(clusterSettings)
-            && (Boolean) pluginSettings.getSettingValue(Settings.Key.PPL_ENABLED);
+            () -> MULTI_ALLOW_EXPLICIT_INDEX.get(clusterSettings)
+                    && (Boolean) pluginSettings.getSettingValue(Settings.Key.PPL_ENABLED);
     this.catalogService = catalogService;
   }
 
@@ -106,12 +106,12 @@ public class RestPPLQueryAction extends BaseRestHandler {
   @Override
   public List<ReplacedRoute> replacedRoutes() {
     return Arrays.asList(
-        new ReplacedRoute(
-            RestRequest.Method.POST, QUERY_API_ENDPOINT,
-            RestRequest.Method.POST, LEGACY_QUERY_API_ENDPOINT),
-        new ReplacedRoute(
-            RestRequest.Method.POST, EXPLAIN_API_ENDPOINT,
-            RestRequest.Method.POST, LEGACY_EXPLAIN_API_ENDPOINT));
+            new ReplacedRoute(
+                    RestRequest.Method.POST, QUERY_API_ENDPOINT,
+                    RestRequest.Method.POST, LEGACY_QUERY_API_ENDPOINT),
+            new ReplacedRoute(
+                    RestRequest.Method.POST, EXPLAIN_API_ENDPOINT,
+                    RestRequest.Method.POST, LEGACY_EXPLAIN_API_ENDPOINT));
   }
 
   @Override
@@ -134,7 +134,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
 
     if (!pplEnabled.get()) {
       return channel -> reportError(channel, new IllegalAccessException(
-          "Either plugins.ppl.enabled or rest.action.multi.allow_explicit_index setting is false"
+              "Either plugins.ppl.enabled or rest.action.multi.allow_explicit_index setting is false"
       ), BAD_REQUEST);
     }
 
@@ -179,7 +179,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
    * is still in legacy module.
    */
   private ResponseListener<ExplainResponse> createExplainResponseListener(
-      RestChannel channel) {
+          RestChannel channel) {
     return new ResponseListener<ExplainResponse>() {
       @Override
       public void onResponse(ExplainResponse response) {
@@ -195,7 +195,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
       public void onFailure(Exception e) {
         LOG.error("Error happened during explain", e);
         sendResponse(channel, INTERNAL_SERVER_ERROR,
-            "Failed to explain the query due to error: " + e.getMessage());
+                "Failed to explain the query due to error: " + e.getMessage());
       }
     };
   }
@@ -217,7 +217,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
       @Override
       public void onResponse(QueryResponse response) {
         sendResponse(channel, OK, formatter.format(new QueryResult(response.getSchema(),
-            response.getResults())));
+                response.getResults())));
       }
 
       @Override
@@ -244,22 +244,22 @@ public class RestPPLQueryAction extends BaseRestHandler {
 
   private void sendResponse(RestChannel channel, RestStatus status, String content) {
     channel.sendResponse(
-        new BytesRestResponse(status, "application/json; charset=UTF-8", content));
+            new BytesRestResponse(status, "application/json; charset=UTF-8", content));
   }
 
   private void reportError(final RestChannel channel, final Exception e, final RestStatus status) {
     channel.sendResponse(new BytesRestResponse(status,
-        ErrorMessageFactory.createErrorMessage(e, status.getStatus()).toString()));
+            ErrorMessageFactory.createErrorMessage(e, status.getStatus()).toString()));
   }
 
   private static boolean isClientError(Exception e) {
     return e instanceof NullPointerException
-        // NPE is hard to differentiate but more likely caused by bad query
-        || e instanceof IllegalArgumentException
-        || e instanceof IndexNotFoundException
-        || e instanceof SemanticCheckException
-        || e instanceof ExpressionEvaluationException
-        || e instanceof QueryEngineException
-        || e instanceof SyntaxCheckException;
+            // NPE is hard to differentiate but more likely caused by bad query
+            || e instanceof IllegalArgumentException
+            || e instanceof IndexNotFoundException
+            || e instanceof SemanticCheckException
+            || e instanceof ExpressionEvaluationException
+            || e instanceof QueryEngineException
+            || e instanceof SyntaxCheckException;
   }
 }

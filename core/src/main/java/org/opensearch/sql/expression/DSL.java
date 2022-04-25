@@ -110,6 +110,10 @@ public class DSL {
     return new NamedExpression(name, expression, alias);
   }
 
+  public static NamedExpression named(String name, Expression expression, Boolean isColumn) {
+    return new NamedExpression(name, expression, isColumn);
+  }
+
   public static NamedAggregator named(String name, Aggregator aggregator) {
     return new NamedAggregator(name, aggregator);
   }

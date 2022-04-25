@@ -4,16 +4,24 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import okhttp3.OkHttpClient;
 import org.apache.commons.math3.util.Pair;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.opensearch.security.SecurityAccess;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
+import org.opensearch.sql.prometheus.client.PrometheusClient;
+import org.opensearch.sql.prometheus.client.PrometheusClientImpl;
+import org.opensearch.sql.prometheus.planner.executor.PrometheusExecutionEngine;
+import org.opensearch.sql.prometheus.planner.executor.protector.PrometheusExecutionProtector;
+import org.opensearch.sql.prometheus.storage.PrometheusStorageEngine;
 import org.opensearch.sql.storage.StorageEngine;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.security.PrivilegedExceptionAction;
 import java.util.HashMap;
 import java.util.Map;
@@ -71,12 +79,24 @@ public class PPLCatalogService implements CatalogService {
         }
     }
 
-    private Pair<StorageEngine, ExecutionEngine> createStorageEngineAndExecutionEngine(JsonNode catalog) {
-        System.out.println("Constructed connector for catalog :: " + catalog.toString());
-        return null;
+    private Pair<StorageEngine, ExecutionEngine> createStorageEngineAndExecutionEngine(JsonNode catalog) throws URISyntaxException {
+        StorageEngine storageEngine = null;
+        ExecutionEngine executionEngine = null;
+        switch (catalog.get("connector").asText()) {
+            case "prometheus":
+                PrometheusClient prometheusClient = new PrometheusClientImpl(new OkHttpClient(), new URI(catalog.get("uri").asText()));
+                storageEngine = new PrometheusStorageEngine(prometheusClient);
+                executionEngine = new PrometheusExecutionEngine(prometheusClient,
+                        new PrometheusExecutionProtector(
+                                new org.opensearch.sql.prometheus.monitor.OpenSearchResourceMonitor(
+                                        new org.opensearch.sql.prometheus.monitor.OpenSearchMemoryHealthy())));
+                break;
+        }
+        return new Pair<>(storageEngine, executionEngine);
     }
 
-    private void constructConnectors(ArrayNode catalogs) {
+    private void constructConnectors(ArrayNode catalogs) throws URISyntaxException {
+        System.out.println("Constructing connectors for catalogs: "+ catalogs.toString());
         storageEngineMap = new HashMap<>();
         executionEngineMap = new HashMap<>();
         for (JsonNode catalog : catalogs) {

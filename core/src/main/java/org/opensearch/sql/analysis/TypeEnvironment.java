@@ -19,6 +19,8 @@ import org.opensearch.sql.expression.Expression;
 import org.opensearch.sql.expression.ReferenceExpression;
 import org.opensearch.sql.expression.env.Environment;
 
+import javax.naming.Name;
+
 /**
  * The definition of Type Environment.
  */
@@ -87,6 +89,10 @@ public class TypeEnvironment implements Environment<Symbol, ExprType> {
 
   public void remove(Symbol symbol) {
     symbolTable.remove(symbol);
+  }
+
+  public Boolean isTableColumn(Namespace namespace, String key) {
+    return symbolTable.isColumn(namespace, key);
   }
 
   /**

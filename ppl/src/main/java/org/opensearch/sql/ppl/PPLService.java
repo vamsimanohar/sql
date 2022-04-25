@@ -14,6 +14,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.sql.analysis.AnalysisContext;
 import org.opensearch.sql.analysis.Analyzer;
+import org.opensearch.sql.analysis.ExpressionAnalyzer;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.catalog.CatalogService;
@@ -90,19 +91,19 @@ public class PPLService {
     // 1.Parse query and convert parse tree (CST) to abstract syntax tree (AST)
     ParseTree cst = parser.analyzeSyntax(request.getRequest());
     UnresolvedPlan ast = cst.accept(
-        new AstBuilder(new AstExpressionBuilder(), request.getRequest()));
+            new AstBuilder(new AstExpressionBuilder(), request.getRequest()));
     LOG.info("[{}] Incoming request {}", LogUtils.getRequestId(), anonymizer.anonymizeData(ast));
 
     setConnector(ast);
     StorageEngine storageEngine = catalogService.getStorageEngine(connector).orElse(openSearchStorageEngine);
 
     // 2.Analyze abstract syntax to generate logical plan
-    LogicalPlan logicalPlan = analyzer.analyze(UnresolvedPlanHelper.addSelectAll(ast),
-        new AnalysisContext());
+    LogicalPlan logicalPlan = new Analyzer(new ExpressionAnalyzer(repository), storageEngine).analyze(UnresolvedPlanHelper.addSelectAll(ast),
+            new AnalysisContext());
 
     // 3.Generate optimal physical plan from logical plan
     return new Planner(storageEngine, LogicalPlanOptimizer.create(new DSL(repository)))
-        .plan(logicalPlan);
+            .plan(logicalPlan);
   }
 
   private void setConnector(UnresolvedPlan unresolvedPlan) {

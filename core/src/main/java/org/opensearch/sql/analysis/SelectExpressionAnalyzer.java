@@ -97,7 +97,8 @@ public class SelectExpressionAnalyzer
     TypeEnvironment environment = context.peek();
     Map<String, ExprType> lookupAllFields = environment.lookupAllFields(Namespace.FIELD_NAME);
     return lookupAllFields.entrySet().stream().map(entry -> DSL.named(entry.getKey(),
-        new ReferenceExpression(entry.getKey(), entry.getValue()))).collect(Collectors.toList());
+        new ReferenceExpression(entry.getKey(), entry.getValue()), environment
+                    .isTableColumn(Namespace.FIELD_NAME, entry.getKey()))).collect(Collectors.toList());
   }
 
   /**

@@ -120,7 +120,7 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
     context.push();
     TypeEnvironment curEnv = context.peek();
     Table table = storageEngine.getTable(node.getTableName());
-    table.getFieldTypes().forEach((k, v) -> curEnv.define(new Symbol(Namespace.FIELD_NAME, k), v));
+    table.getFieldTypes().forEach((k, v) -> curEnv.define(new Symbol(Namespace.FIELD_NAME, k, true), v));
 
     // Put index name or its alias in index namespace on type environment so qualifier
     // can be removed when analyzing qualified name. The value (expr type) here doesn't matter.
@@ -217,8 +217,18 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
     TypeEnvironment newEnv = context.peek();
     aggregators.forEach(aggregator -> newEnv.define(new Symbol(Namespace.FIELD_NAME,
         aggregator.getName()), aggregator.type()));
-    groupBys.forEach(group -> newEnv.define(new Symbol(Namespace.FIELD_NAME,
-        group.getNameOrAlias()), group.type()));
+    groupBys.forEach(group -> {
+      if(group.getNameOrAlias().contains("@timestamp")) {
+        newEnv.define(new Symbol(Namespace.FIELD_NAME,
+                group.getNameOrAlias()), group.type());
+        return;
+      }
+      else {
+        newEnv.define(new Symbol(Namespace.FIELD_NAME,
+                group.getNameOrAlias(), true), group.type());
+      }
+
+    });
     return new LogicalAggregation(child, aggregators, groupBys);
   }
 

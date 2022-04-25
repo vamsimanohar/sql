@@ -54,7 +54,7 @@ public class ProjectOperator extends PhysicalPlan {
   @Override
   public ExprValue next() {
     ExprValue inputValue = input.next();
-    ImmutableMap.Builder<String, ExprValue> mapBuilder = new Builder<>();
+      ImmutableMap.Builder<String, ExprValue> mapBuilder = new Builder<>();
     for (NamedExpression expr : projectList) {
       ExprValue exprValue = expr.valueOf(inputValue.bindingTuples());
       if (namedParseExpressions.stream()

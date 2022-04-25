@@ -223,6 +223,7 @@ relevanceExpression
 /** tables */
 tableSource
     : qualifiedName
+    | ident DOT PROMQL LT_PRTHS BQUOTA_STRING RT_PRTHS
     | ID_DATE_SUFFIX
     ;
 

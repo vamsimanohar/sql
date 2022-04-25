@@ -31,37 +31,37 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class OpenSearchPluginConfig {
 
-  @Autowired
-  private ClusterService clusterService;
+    @Autowired
+    private ClusterService clusterService;
 
-  @Autowired
-  private NodeClient nodeClient;
+    @Autowired
+    private NodeClient nodeClient;
 
-  @Autowired
-  private Settings settings;
+    @Autowired
+    private Settings settings;
 
-  @Bean
-  public OpenSearchClient client() {
-    return new OpenSearchNodeClient(clusterService, nodeClient);
-  }
+    @Bean
+    public OpenSearchClient client() {
+        return new OpenSearchNodeClient(clusterService, nodeClient);
+    }
 
-  @Bean
-  public StorageEngine storageEngine() {
-    return new OpenSearchStorageEngine(client(), settings);
-  }
+    @Bean
+    public StorageEngine storageEngine() {
+        return new OpenSearchStorageEngine(client(), settings);
+    }
 
-  @Bean
-  public ExecutionEngine executionEngine() {
-    return new OpenSearchExecutionEngine(client(), protector());
-  }
+    @Bean
+    public ExecutionEngine executionEngine() {
+        return new OpenSearchExecutionEngine(client(), protector());
+    }
 
-  @Bean
-  public ResourceMonitor resourceMonitor() {
-    return new OpenSearchResourceMonitor(settings, new OpenSearchMemoryHealthy());
-  }
+    @Bean
+    public ResourceMonitor resourceMonitor() {
+        return new OpenSearchResourceMonitor(settings, new OpenSearchMemoryHealthy());
+    }
 
-  @Bean
-  public ExecutionProtector protector() {
-    return new OpenSearchExecutionProtector(resourceMonitor());
-  }
+    @Bean
+    public ExecutionProtector protector() {
+        return new OpenSearchExecutionProtector(resourceMonitor());
+    }
 }
