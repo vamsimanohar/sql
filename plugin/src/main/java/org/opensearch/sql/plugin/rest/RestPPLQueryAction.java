@@ -44,6 +44,7 @@ import org.opensearch.sql.legacy.metrics.MetricName;
 import org.opensearch.sql.legacy.metrics.Metrics;
 import org.opensearch.sql.opensearch.response.error.ErrorMessageFactory;
 import org.opensearch.sql.opensearch.security.SecurityAccess;
+import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.plugin.request.PPLQueryRequestFactory;
 import org.opensearch.sql.ppl.PPLService;
 import org.opensearch.sql.ppl.config.PPLServiceConfig;
@@ -78,18 +79,23 @@ public class RestPPLQueryAction extends BaseRestHandler {
 
   private final Supplier<Boolean> pplEnabled;
 
+  private final CatalogService catalogService;
+
+
   /**
    * Constructor of RestPPLQueryAction.
    */
   public RestPPLQueryAction(RestController restController, ClusterService clusterService,
                             Settings pluginSettings,
-                            org.opensearch.common.settings.Settings clusterSettings) {
+                            org.opensearch.common.settings.Settings clusterSettings,
+                            CatalogService catalogService) {
     super();
     this.clusterService = clusterService;
     this.pluginSettings = pluginSettings;
     this.pplEnabled =
         () -> MULTI_ALLOW_EXPLICIT_INDEX.get(clusterSettings)
             && (Boolean) pluginSettings.getSettingValue(Settings.Key.PPL_ENABLED);
+    this.catalogService = catalogService;
   }
 
   @Override
@@ -124,7 +130,6 @@ public class RestPPLQueryAction extends BaseRestHandler {
   protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient nodeClient) {
     Metrics.getInstance().getNumericalMetric(MetricName.PPL_REQ_TOTAL).increment();
     Metrics.getInstance().getNumericalMetric(MetricName.PPL_REQ_COUNT_TOTAL).increment();
-
     LogUtils.addRequestId();
 
     if (!pplEnabled.get()) {
@@ -160,6 +165,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
       context.registerBean(ClusterService.class, () -> clusterService);
       context.registerBean(NodeClient.class, () -> client);
       context.registerBean(Settings.class, () -> pluginSettings);
+      context.registerBean(CatalogService.class, () -> catalogService);
       context.register(OpenSearchPluginConfig.class);
       context.register(PPLServiceConfig.class);
       context.refresh();
