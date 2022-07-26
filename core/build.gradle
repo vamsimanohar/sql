@@ -80,7 +80,9 @@ jacocoTestCoverageVerification {
         rule {
             element = 'CLASS'
             excludes = [
-                    'org.opensearch.sql.utils.MLCommonsConstants'
+                    'org.opensearch.sql.utils.MLCommonsConstants',
+                    'org.opensearch.sql.utils.Constants'
+
             ]
             limit {
                 counter = 'LINE'

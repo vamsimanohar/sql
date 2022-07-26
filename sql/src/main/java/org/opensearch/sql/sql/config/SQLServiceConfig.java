@@ -8,6 +8,7 @@ package org.opensearch.sql.sql.config;
 
 import org.opensearch.sql.analysis.Analyzer;
 import org.opensearch.sql.analysis.ExpressionAnalyzer;
+import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.expression.config.ExpressionConfig;
 import org.opensearch.sql.expression.function.BuiltinFunctionRepository;
@@ -33,16 +34,26 @@ public class SQLServiceConfig {
   private ExecutionEngine executionEngine;
 
   @Autowired
+  private CatalogService catalogService;
+
+  @Autowired
   private BuiltinFunctionRepository functionRepository;
 
   @Bean
   public Analyzer analyzer() {
-    return new Analyzer(new ExpressionAnalyzer(functionRepository), storageEngine);
+    return new Analyzer(new ExpressionAnalyzer(functionRepository), catalogService);
   }
 
+  /**
+   * The registration of OpenSearch storage engine happens here because
+   * OpenSearchStorageEngine is dependent on NodeClient.
+   *
+   * @return SQLService.
+   */
   @Bean
   public SQLService sqlService() {
-    return new SQLService(new SQLSyntaxParser(), analyzer(), storageEngine, executionEngine,
+    catalogService.registerOpenSearchStorageEngine(storageEngine);
+    return new SQLService(new SQLSyntaxParser(), analyzer(), executionEngine,
         functionRepository);
   }
 
