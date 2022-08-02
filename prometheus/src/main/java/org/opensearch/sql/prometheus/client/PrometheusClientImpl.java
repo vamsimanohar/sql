@@ -72,6 +72,24 @@ public class PrometheusClientImpl implements PrometheusClient {
   }
 
   @Override
+  public String[] getMetrics() throws IOException {
+    String queryUrl = String.format("%s/api/v1/label/__name__/values", uri.toString());
+    logger.info("queryUrl: " + queryUrl);
+    Request request = new Request.Builder()
+        .url(queryUrl)
+        .build();
+    Response response = this.okHttpClient.newCall(request).execute();
+    ObjectMapper om = new ObjectMapper();
+    PrometheusLabelResponse prometheusLabelResponse =
+        om.readValue(Objects.requireNonNull(response.body()).string(),
+            PrometheusLabelResponse.class);
+    if ("success".equals(prometheusLabelResponse.getStatus())) {
+      return prometheusLabelResponse.getData();
+    }
+    return null;
+  }
+
+  @Override
   public void schedule(Runnable task) {
     task.run();
   }

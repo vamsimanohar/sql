@@ -12,6 +12,8 @@ public interface PrometheusClient {
 
   String[] getLabels(String metricName) throws IOException;
 
+  String[] getMetrics() throws IOException;
+
   /**
    * Schedule a task to run.
    *
