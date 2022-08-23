@@ -9,6 +9,8 @@ package org.opensearch.sql.sql.config;
 import org.opensearch.sql.analysis.Analyzer;
 import org.opensearch.sql.analysis.ExpressionAnalyzer;
 import org.opensearch.sql.catalog.CatalogService;
+import org.opensearch.sql.catalog.DefaultCatalogService;
+import org.opensearch.sql.catalog.StorageEngineRegistry;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.expression.config.ExpressionConfig;
 import org.opensearch.sql.expression.function.BuiltinFunctionRepository;
@@ -34,14 +36,26 @@ public class SQLServiceConfig {
   private ExecutionEngine executionEngine;
 
   @Autowired
-  private CatalogService catalogService;
+  private StorageEngineRegistry storageEngineRegistry;
 
   @Autowired
   private BuiltinFunctionRepository functionRepository;
 
   @Bean
-  public Analyzer analyzer() {
+  public Analyzer analyzer(CatalogService catalogService) {
     return new Analyzer(new ExpressionAnalyzer(functionRepository), catalogService);
+  }
+
+  /**
+   * Catalogservice Bean.
+   *
+   * @return CatalogService.
+   */
+  @Bean
+  public CatalogService catalogService() {
+    CatalogService catalogService = new DefaultCatalogService(storageEngineRegistry);
+    catalogService.registerOpenSearchStorageEngine(storageEngine);
+    return catalogService;
   }
 
   /**
@@ -51,9 +65,8 @@ public class SQLServiceConfig {
    * @return SQLService.
    */
   @Bean
-  public SQLService sqlService() {
-    catalogService.registerOpenSearchStorageEngine(storageEngine);
-    return new SQLService(new SQLSyntaxParser(), analyzer(), executionEngine,
+  public SQLService sqlService(Analyzer analyzer) {
+    return new SQLService(new SQLSyntaxParser(), analyzer, executionEngine,
         functionRepository);
   }
 

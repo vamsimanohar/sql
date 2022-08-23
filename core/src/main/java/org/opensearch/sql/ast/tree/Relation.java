@@ -81,7 +81,7 @@ public class Relation extends UnresolvedPlan {
    *
    * @return fully qualified table name with catalog.
    */
-  public String getFullyQualifiedTableName() {
+  public String getTableNameWithCatalog() {
     return tableName.stream()
         .map(UnresolvedExpression::toString)
         .collect(Collectors.joining(COMMA));

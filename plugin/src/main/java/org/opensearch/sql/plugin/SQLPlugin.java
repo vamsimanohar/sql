@@ -6,16 +6,23 @@
 package org.opensearch.sql.plugin;
 
 import com.google.common.collect.ImmutableList;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.opensearch.action.ActionRequest;
 import org.opensearch.action.ActionResponse;
 import org.opensearch.action.ActionType;
 import org.opensearch.client.Client;
+import org.opensearch.client.node.NodeClient;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.service.ClusterService;
@@ -39,6 +46,8 @@ import org.opensearch.rest.RestHandler;
 import org.opensearch.script.ScriptContext;
 import org.opensearch.script.ScriptEngine;
 import org.opensearch.script.ScriptService;
+import org.opensearch.sql.catalog.StorageEngineRegistry;
+import org.opensearch.sql.catalog.model.CatalogMetadata;
 import org.opensearch.sql.legacy.esdomain.LocalClusterState;
 import org.opensearch.sql.legacy.executor.AsyncRestExecutor;
 import org.opensearch.sql.legacy.metrics.Metrics;
@@ -48,8 +57,8 @@ import org.opensearch.sql.opensearch.setting.LegacyOpenDistroSettings;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.opensearch.storage.script.ExpressionScriptEngine;
 import org.opensearch.sql.opensearch.storage.serialization.DefaultExpressionSerializer;
-import org.opensearch.sql.plugin.catalog.CatalogServiceImpl;
 import org.opensearch.sql.plugin.catalog.CatalogSettings;
+import org.opensearch.sql.plugin.catalog.StorageEngineRegistryImpl;
 import org.opensearch.sql.plugin.rest.RestPPLQueryAction;
 import org.opensearch.sql.plugin.rest.RestPPLStatsAction;
 import org.opensearch.sql.plugin.rest.RestQuerySettingsAction;
@@ -63,7 +72,11 @@ import org.opensearch.watcher.ResourceWatcherService;
 
 public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin, ReloadablePlugin {
 
+  private static final Logger LOG = LogManager.getLogger();
+
   private ClusterService clusterService;
+
+  private StorageEngineRegistry storageEngineRegistry;
 
   /**
    * Settings should be inited when bootstrap the plugin.
@@ -95,8 +108,7 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin, Rel
 
     return Arrays.asList(
         new RestPPLQueryAction(pluginSettings, settings),
-        new RestSqlAction(settings, clusterService, pluginSettings,
-            CatalogServiceImpl.getInstance()),
+        new RestSqlAction(settings, clusterService, pluginSettings, storageEngineRegistry),
         new RestSqlStatsAction(settings, restController),
         new RestPPLStatsAction(settings, restController),
         new RestQuerySettingsAction(settings, restController));
@@ -128,10 +140,12 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin, Rel
       Supplier<RepositoriesService> repositoriesServiceSupplier) {
     this.clusterService = clusterService;
     this.pluginSettings = new OpenSearchSettings(clusterService.getClusterSettings());
-    CatalogServiceImpl.getInstance().loadConnectors(clusterService.getSettings());
+    this.storageEngineRegistry = new StorageEngineRegistryImpl();
+    loadConnectorsFromSettings(clusterService.getSettings());
     LocalClusterState.state().setClusterService(clusterService);
     LocalClusterState.state().setPluginSettings((OpenSearchSettings) pluginSettings);
-
+    NodeClient client1 = (NodeClient) client;
+    LOG.info(client1.toString());
     return super.createComponents(
         client,
         clusterService,
@@ -174,6 +188,37 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin, Rel
 
   @Override
   public void reload(Settings settings) {
-    CatalogServiceImpl.getInstance().loadConnectors(clusterService.getSettings());
+    loadConnectorsFromSettings(settings);
+  }
+
+  private void loadConnectorsFromSettings(Settings settings) {
+    InputStream inputStream = CatalogSettings.CATALOG_CONFIG.get(settings);
+    if (inputStream != null) {
+      List<CatalogMetadata> catalogMetadata = CatalogMetadata.fromInputStream(inputStream);
+      validate(catalogMetadata);
+      this.storageEngineRegistry.loadConnectors(catalogMetadata);
+    }
+  }
+
+  /**
+   * This can be moved to a different validator class
+   * when we introduce more connectors.
+   *
+   * @param catalogs catalogs.
+   */
+  private void validate(List<CatalogMetadata> catalogs) {
+    Set<String> catalogNameSet = new HashSet<>();
+    Set<String> duplicateCatalogNames = catalogs
+        .stream()
+        .map(CatalogMetadata::getName)
+        .filter(catalogName -> !catalogNameSet.add(catalogName))
+        .collect(Collectors.toSet());
+    if (!duplicateCatalogNames.isEmpty()) {
+      LOG.error("Duplicate catalog names are not allowed. Found following duplicates: {}",
+          duplicateCatalogNames.toString());
+      throw new IllegalArgumentException(
+          "Duplicate catalog names are not allowed. Found following duplicates: "
+              + duplicateCatalogNames);
+    }
   }
 }

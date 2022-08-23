@@ -21,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.opensearch.sql.catalog.CatalogService;
+import org.opensearch.sql.catalog.StorageEngineRegistry;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.data.type.ExprCoreType;
 import org.opensearch.sql.executor.ExecutionEngine;
@@ -42,6 +43,9 @@ public class PPLServiceTest {
 
   @Mock
   private StorageEngine storageEngine;
+
+  @Mock
+  private StorageEngineRegistry storageEngineRegistry;
 
   @Mock
   private ExecutionEngine executionEngine;
@@ -70,6 +74,7 @@ public class PPLServiceTest {
     context.registerBean(StorageEngine.class, () -> storageEngine);
     context.registerBean(ExecutionEngine.class, () -> executionEngine);
     context.registerBean(CatalogService.class, () -> catalogService);
+    context.registerBean(StorageEngineRegistry.class, () -> storageEngineRegistry);
     context.register(PPLServiceConfig.class);
     context.refresh();
     pplService = context.getBean(PPLService.class);

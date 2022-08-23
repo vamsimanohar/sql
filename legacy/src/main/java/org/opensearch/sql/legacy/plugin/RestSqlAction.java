@@ -35,7 +35,7 @@ import org.opensearch.rest.BytesRestResponse;
 import org.opensearch.rest.RestChannel;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestStatus;
-import org.opensearch.sql.catalog.CatalogService;
+import org.opensearch.sql.catalog.StorageEngineRegistry;
 import org.opensearch.sql.common.antlr.SyntaxCheckException;
 import org.opensearch.sql.common.utils.QueryContext;
 import org.opensearch.sql.exception.ExpressionEvaluationException;
@@ -91,10 +91,10 @@ public class RestSqlAction extends BaseRestHandler {
 
     public RestSqlAction(Settings settings, ClusterService clusterService,
                          org.opensearch.sql.common.setting.Settings pluginSettings,
-                         CatalogService catalogService) {
+                         StorageEngineRegistry storageEngineRegistry) {
         super();
         this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
-        this.newSqlQueryHandler = new RestSQLQueryAction(clusterService, pluginSettings, catalogService);
+        this.newSqlQueryHandler = new RestSQLQueryAction(clusterService, pluginSettings, storageEngineRegistry);
     }
 
     @Override

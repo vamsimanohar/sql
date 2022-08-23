@@ -23,6 +23,7 @@ import org.opensearch.client.node.NodeClient;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.sql.catalog.CatalogService;
+import org.opensearch.sql.catalog.StorageEngineRegistry;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.sql.domain.SQLQueryRequest;
 import org.opensearch.threadpool.ThreadPool;
@@ -44,6 +45,9 @@ public class RestSQLQueryActionTest {
   @Mock
   private CatalogService catalogService;
 
+  @Mock
+  private StorageEngineRegistry storageEngineRegistry;
+
   @Before
   public void setup() {
     nodeClient = new NodeClient(org.opensearch.common.settings.Settings.EMPTY, threadPool);
@@ -59,7 +63,7 @@ public class RestSQLQueryActionTest {
         QUERY_API_ENDPOINT,
         "");
 
-    RestSQLQueryAction queryAction = new RestSQLQueryAction(clusterService, settings, catalogService);
+    RestSQLQueryAction queryAction = new RestSQLQueryAction(clusterService, settings, storageEngineRegistry);
     assertNotSame(NOT_SUPPORTED_YET, queryAction.prepareRequest(request, nodeClient));
   }
 
@@ -71,7 +75,7 @@ public class RestSQLQueryActionTest {
         EXPLAIN_API_ENDPOINT,
         "");
 
-    RestSQLQueryAction queryAction = new RestSQLQueryAction(clusterService, settings, catalogService);
+    RestSQLQueryAction queryAction = new RestSQLQueryAction(clusterService, settings, storageEngineRegistry);
     assertNotSame(NOT_SUPPORTED_YET, queryAction.prepareRequest(request, nodeClient));
   }
 
@@ -84,7 +88,7 @@ public class RestSQLQueryActionTest {
         QUERY_API_ENDPOINT,
         "");
 
-    RestSQLQueryAction queryAction = new RestSQLQueryAction(clusterService, settings, catalogService);
+    RestSQLQueryAction queryAction = new RestSQLQueryAction(clusterService, settings, storageEngineRegistry);
     assertSame(NOT_SUPPORTED_YET, queryAction.prepareRequest(request, nodeClient));
   }
 

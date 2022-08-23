@@ -20,6 +20,7 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import org.opensearch.sql.ast.AbstractNodeVisitor;
 
+
 @Getter
 @EqualsAndHashCode(callSuper = false)
 public class QualifiedName extends UnresolvedExpression {

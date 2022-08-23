@@ -22,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensearch.sql.catalog.CatalogService;
+import org.opensearch.sql.catalog.StorageEngineRegistry;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.executor.ExecutionEngine.ExplainResponse;
@@ -49,6 +50,9 @@ class SQLServiceTest {
   private CatalogService catalogService;
 
   @Mock
+  private StorageEngineRegistry storageEngineRegistry;
+
+  @Mock
   private ExecutionEngine.Schema schema;
 
   @BeforeEach
@@ -56,6 +60,7 @@ class SQLServiceTest {
     context.registerBean(StorageEngine.class, () -> storageEngine);
     context.registerBean(ExecutionEngine.class, () -> executionEngine);
     context.registerBean(CatalogService.class, () -> catalogService);
+    context.registerBean(StorageEngineRegistry.class, () -> storageEngineRegistry);
     context.register(SQLServiceConfig.class);
     context.refresh();
     sqlService = context.getBean(SQLService.class);

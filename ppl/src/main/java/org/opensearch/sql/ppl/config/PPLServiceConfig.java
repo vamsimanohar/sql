@@ -7,6 +7,8 @@
 package org.opensearch.sql.ppl.config;
 
 import org.opensearch.sql.catalog.CatalogService;
+import org.opensearch.sql.catalog.DefaultCatalogService;
+import org.opensearch.sql.catalog.StorageEngineRegistry;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.expression.config.ExpressionConfig;
 import org.opensearch.sql.expression.function.BuiltinFunctionRepository;
@@ -29,10 +31,22 @@ public class PPLServiceConfig {
   private ExecutionEngine executionEngine;
 
   @Autowired
-  private CatalogService catalogService;
+  private StorageEngineRegistry storageEngineRegistry;
 
   @Autowired
   private BuiltinFunctionRepository functionRepository;
+
+  /**
+   * CatalogService Bean.
+   *
+   * @return CatalogService.
+   */
+  @Bean
+  public CatalogService catalogService() {
+    CatalogService catalogService = new DefaultCatalogService(storageEngineRegistry);
+    catalogService.registerOpenSearchStorageEngine(storageEngine);
+    return catalogService;
+  }
 
   /**
    * The registration of OpenSearch storage engine happens here because
@@ -41,8 +55,7 @@ public class PPLServiceConfig {
    * @return PPLService.
    */
   @Bean
-  public PPLService pplService() {
-    catalogService.registerOpenSearchStorageEngine(storageEngine);
+  public PPLService pplService(CatalogService catalogService) {
     return new PPLService(new PPLSyntaxParser(), executionEngine,
             functionRepository, catalogService);
   }

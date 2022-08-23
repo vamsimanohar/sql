@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.sql.plugin.model;
+package org.opensearch.sql.catalog.model;
 
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;

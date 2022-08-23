@@ -108,6 +108,7 @@ public class RestPPLQueryAction extends BaseRestHandler {
           "Either plugins.ppl.enabled or rest.action.multi.allow_explicit_index setting is false"),
           BAD_REQUEST);
     }
+    LOG.info(nodeClient.toString());
 
     TransportPPLQueryRequest transportPPLQueryRequest = new TransportPPLQueryRequest(
             PPLQueryRequestFactory.getPPLRequest(request)
