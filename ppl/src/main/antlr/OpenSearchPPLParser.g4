@@ -130,6 +130,8 @@ adParameter
 fromClause
     : SOURCE EQUAL tableSourceClause
     | INDEX EQUAL tableSourceClause
+    | SOURCE EQUAL tableFunction
+    | INDEX EQUAL tableFunction
     ;
 
 tableSourceClause
@@ -253,33 +255,20 @@ multiFieldRelevanceFunction
 /** tables */
 tableSource
     : qualifiedName
-    | catalogName DOT nativeQueryFunction
     | ID_DATE_SUFFIX
     ;
 
-nativeQueryFunction
-    : nativeQueryFunctionName LT_PRTHS
-        field = nativeQuery (COMMA nativeQueryArg)* RT_PRTHS
+tableFunction
+    : qualifiedName LT_PRTHS
+        (tableFunctionArgument (COMMA tableFunctionArgument)*)? RT_PRTHS
     ;
 
-nativeQueryFunctionName
-    : NATIVEQUERY
+tableFunctionArgument
+    : (ident EQUAL)? tableFunctionArgValue
     ;
 
-nativeQuery
-    : BQUOTA_STRING
-    ;
-
-nativeQueryArg
-    : nativeQueryArgName EQUAL nativeQueryArgValue
-    ;
-
-nativeQueryArgName
-    : STARTTIME | ENDTIME | STEP
-    ;
-
-nativeQueryArgValue
-    : INTEGER_LITERAL
+tableFunctionArgValue
+    : literalValue
     ;
 
 /** fields */
@@ -531,10 +520,6 @@ qualifiedName
 
 wcQualifiedName
     : wildcard (DOT wildcard)*                       #identsAsWildcardQualifiedName
-    ;
-
-catalogName
-    : ident                                         #identAsCatalogName
     ;
 
 ident
