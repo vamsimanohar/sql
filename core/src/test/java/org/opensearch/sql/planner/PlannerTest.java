@@ -109,6 +109,19 @@ public class PlannerTest extends PhysicalPlanTestBase {
     );
   }
 
+  @Test
+  public void plan_a_query_with_table_function() {
+    doAnswer(returnsFirstArg()).when(optimizer).optimize(any());
+    assertPhysicalPlan(
+        scan,
+        LogicalPlanDSL.tableFunction(dsl.query_range_function(
+            dsl.namedArgument("query", DSL.literal("http_latency")),
+            dsl.namedArgument("starttime", DSL.literal(12345)),
+            dsl.namedArgument("endtime", DSL.literal(12345)),
+            dsl.namedArgument("step", DSL.literal(14))), storageEngine.getTable("schema"))
+    );
+  }
+
   protected void assertPhysicalPlan(PhysicalPlan expected, LogicalPlan logicalPlan) {
     assertEquals(expected, analyze(logicalPlan));
   }

@@ -401,5 +401,5 @@ public class AstExpressionBuilder extends OpenSearchPPLParserBaseVisitor<Unresol
         v.relevanceArgValue().getText()), DataType.STRING))));
     return builder.build();
   }
-
+  
 }
