@@ -5,11 +5,14 @@
 
 package org.opensearch.sql.expression.function;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.data.type.WideningTypeRule;
 
@@ -25,6 +28,15 @@ public class FunctionSignature {
 
   private final FunctionName functionName;
   private final List<ExprType> paramTypeList;
+  private List<String> argumentNames = Collections.emptyList();
+
+  public FunctionSignature(FunctionName functionName,
+                           List<ExprType> paramTypeList,
+                           List<String> argumentNames) {
+    this.functionName = functionName;
+    this.paramTypeList = paramTypeList;
+    this.argumentNames = argumentNames;
+  }
 
   /**
    * calculate the function signature match degree.

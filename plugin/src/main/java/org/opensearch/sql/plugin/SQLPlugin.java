@@ -12,6 +12,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.opensearch.action.ActionRequest;
 import org.opensearch.action.ActionResponse;
 import org.opensearch.action.ActionType;
@@ -68,6 +70,7 @@ import org.opensearch.watcher.ResourceWatcherService;
 public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin, ReloadablePlugin {
 
   private ClusterService clusterService;
+  private static final Logger LOG = LogManager.getLogger();
 
   /**
    * Settings should be inited when bootstrap the plugin.
@@ -181,9 +184,11 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin, Rel
 
   @Override
   public void reload(Settings settings) {
-    CatalogServiceImpl.getInstance().loadConnectors(clusterService.getSettings());
+    CatalogServiceImpl.getInstance().loadConnectors(settings);
     CatalogServiceImpl.getInstance().registerOpenSearchStorageEngine(openSearchStorageEngine());
   }
+
+
 
   private StorageEngine openSearchStorageEngine() {
     return new OpenSearchStorageEngine(new OpenSearchNodeClient(client),

@@ -39,10 +39,12 @@ import org.antlr.v4.runtime.tree.ParseTree;
 import org.opensearch.sql.ast.dsl.AstDSL;
 import org.opensearch.sql.ast.expression.Alias;
 import org.opensearch.sql.ast.expression.Field;
+import org.opensearch.sql.ast.expression.Function;
 import org.opensearch.sql.ast.expression.Let;
 import org.opensearch.sql.ast.expression.Literal;
 import org.opensearch.sql.ast.expression.Map;
 import org.opensearch.sql.ast.expression.ParseMethod;
+import org.opensearch.sql.ast.expression.UnresolvedArgument;
 import org.opensearch.sql.ast.expression.UnresolvedExpression;
 import org.opensearch.sql.ast.tree.AD;
 import org.opensearch.sql.ast.tree.Aggregation;
@@ -58,6 +60,7 @@ import org.opensearch.sql.ast.tree.RareTopN.CommandType;
 import org.opensearch.sql.ast.tree.Relation;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Sort;
+import org.opensearch.sql.ast.tree.TableFunction;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.common.utils.StringUtils;
 import org.opensearch.sql.ppl.antlr.parser.OpenSearchPPLParser;
@@ -324,7 +327,11 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
    */
   @Override
   public UnresolvedPlan visitFromClause(FromClauseContext ctx) {
-    return visitTableSourceClause(ctx.tableSourceClause());
+    if (ctx.tableFunction() != null) {
+      return visitTableFunction(ctx.tableFunction());
+    } else {
+      return visitTableSourceClause(ctx.tableSourceClause());
+    }
   }
 
   @Override
@@ -332,6 +339,20 @@ public class AstBuilder extends OpenSearchPPLParserBaseVisitor<UnresolvedPlan> {
     return new Relation(ctx.tableSource()
         .stream().map(this::internalVisitExpression)
         .collect(Collectors.toList()));
+  }
+
+  @Override
+  public UnresolvedPlan visitTableFunction(OpenSearchPPLParser.TableFunctionContext ctx) {
+    ImmutableList.Builder<UnresolvedExpression> builder = ImmutableList.builder();
+    ctx.tableFunctionArgument().forEach(arg
+        -> {
+      String argName = (arg.ident() != null) ? arg.ident().getText() : null;
+      builder.add(
+          new UnresolvedArgument(argName,
+              this.internalVisitExpression(arg.tableFunctionArgValue())));
+
+    });
+    return new TableFunction(this.internalVisitExpression(ctx.qualifiedName()), builder.build());
   }
 
   /**

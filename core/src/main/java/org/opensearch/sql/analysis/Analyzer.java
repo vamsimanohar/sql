@@ -6,7 +6,6 @@
 
 package org.opensearch.sql.analysis;
 
-import static org.opensearch.sql.analysis.model.CatalogName.DEFAULT_CATALOG_NAME;
 import static org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_FIRST;
 import static org.opensearch.sql.ast.tree.Sort.NullOrder.NULL_LAST;
 import static org.opensearch.sql.ast.tree.Sort.SortOrder.ASC;
@@ -27,6 +26,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.opensearch.sql.analysis.model.CatalogSchemaIdentifierName;
@@ -57,6 +57,7 @@ import org.opensearch.sql.ast.tree.RelationSubquery;
 import org.opensearch.sql.ast.tree.Rename;
 import org.opensearch.sql.ast.tree.Sort;
 import org.opensearch.sql.ast.tree.Sort.SortOption;
+import org.opensearch.sql.ast.tree.TableFunction;
 import org.opensearch.sql.ast.tree.UnresolvedPlan;
 import org.opensearch.sql.ast.tree.Values;
 import org.opensearch.sql.catalog.CatalogService;
@@ -66,10 +67,12 @@ import org.opensearch.sql.exception.SemanticCheckException;
 import org.opensearch.sql.expression.DSL;
 import org.opensearch.sql.expression.Expression;
 import org.opensearch.sql.expression.LiteralExpression;
+import org.opensearch.sql.expression.NamedArgumentExpression;
 import org.opensearch.sql.expression.NamedExpression;
 import org.opensearch.sql.expression.ReferenceExpression;
 import org.opensearch.sql.expression.aggregation.Aggregator;
 import org.opensearch.sql.expression.aggregation.NamedAggregator;
+import org.opensearch.sql.expression.function.ConnectorTableFunction;
 import org.opensearch.sql.expression.parse.ParseExpression;
 import org.opensearch.sql.planner.logical.LogicalAD;
 import org.opensearch.sql.planner.logical.LogicalAggregation;
@@ -86,6 +89,7 @@ import org.opensearch.sql.planner.logical.LogicalRemove;
 import org.opensearch.sql.planner.logical.LogicalRename;
 import org.opensearch.sql.planner.logical.LogicalSort;
 import org.opensearch.sql.planner.logical.LogicalValues;
+import org.opensearch.sql.storage.StorageEngine;
 import org.opensearch.sql.storage.Table;
 import org.opensearch.sql.utils.ParseUtils;
 
@@ -152,6 +156,56 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
     curEnv.define(new Symbol(Namespace.INDEX_NAME, node.getAliasAsTableName()), STRUCT);
     return subquery;
   }
+
+  @Override
+  public LogicalPlan visitTableFunction(TableFunction node, AnalysisContext context) {
+    QualifiedName qualifiedName = node.getFunctionName();
+    CatalogSchemaIdentifierName catalogSchemaIdentifierName =
+        new CatalogSchemaIdentifierName(qualifiedName.getParts(), catalogService.getCatalogs());
+    StorageEngine storageEngine
+        = catalogService.getStorageEngine(catalogSchemaIdentifierName.getCatalogName());
+    Optional<ConnectorTableFunction> connectorTableFunction
+        = storageEngine.getFunction(catalogSchemaIdentifierName.getIdentifierName());
+    if (connectorTableFunction.isPresent()) {
+      List<Expression> arguments
+          =
+          analyzeTableFunctionArguments(connectorTableFunction.get(), node.getArguments(), context);
+      return new LogicalRelation(catalogSchemaIdentifierName.getIdentifierName(),
+          connectorTableFunction.get().apply(arguments));
+    } else {
+      throw new SemanticCheckException(String.format("Unknown Table Function :%s",
+          catalogSchemaIdentifierName.getIdentifierName()));
+    }
+  }
+
+  private List<Expression> analyzeTableFunctionArguments(
+      ConnectorTableFunction connectorTableFunction,
+      List<UnresolvedExpression> arguments, AnalysisContext context) {
+
+    List<Expression> args = arguments.stream()
+        .map(unresolvedExpression -> expressionAnalyzer.analyze(unresolvedExpression, context))
+        .collect(Collectors.toList());
+    final List<String> argumentNames = connectorTableFunction.getFunctionSignature()
+        .getArgumentNames();
+    Boolean argumentsPassedByName = args.stream()
+        .noneMatch(arg -> StringUtils.isEmpty(((NamedArgumentExpression) arg).getArgName()));
+    Boolean argumentsPassedByPosition = args.stream()
+        .allMatch(arg -> StringUtils.isEmpty(((NamedArgumentExpression) arg).getArgName()));
+    if (!(argumentsPassedByName || argumentsPassedByPosition)) {
+      throw new SemanticCheckException("Arguments should be either passed by name or position");
+    }
+    if (argumentsPassedByPosition) {
+      List<Expression> namedArguments = new ArrayList<>();
+      for (int i = 0; i < arguments.size(); i++) {
+        namedArguments.add(new NamedArgumentExpression(argumentNames.get(i),
+            ((NamedArgumentExpression) args.get(i)).getValue()));
+      }
+      return namedArguments;
+    } else {
+      return args;
+    }
+  }
+
 
   @Override
   public LogicalPlan visitLimit(Limit node, AnalysisContext context) {
