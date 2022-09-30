@@ -147,6 +147,8 @@ adParameter
 fromClause
     : SOURCE EQUAL tableSourceClause
     | INDEX EQUAL tableSourceClause
+    | SOURCE EQUAL tableFunction
+    | INDEX EQUAL tableFunction
     ;
 
 tableSourceClause
@@ -271,6 +273,19 @@ multiFieldRelevanceFunction
 tableSource
     : qualifiedName
     | ID_DATE_SUFFIX
+    ;
+
+tableFunction
+    : qualifiedName LT_PRTHS
+        (tableFunctionArgument (COMMA tableFunctionArgument)*)? RT_PRTHS
+    ;
+
+tableFunctionArgument
+    : (ident EQUAL)? tableFunctionArgValue
+    ;
+
+tableFunctionArgValue
+    : literalValue
     ;
 
 /** fields */
