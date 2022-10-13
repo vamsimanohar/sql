@@ -14,7 +14,7 @@ import lombok.Getter;
 @Getter
 public class CatalogName {
 
-  public static final String DEFAULT_CATALOG_NAME = ".opensearch";
+  public static final String DEFAULT_CATALOG_NAME = "@opensearch";
   private String name = DEFAULT_CATALOG_NAME;
 
   /**
@@ -25,7 +25,8 @@ public class CatalogName {
    * @return remaining parts.
    */
   List<String> capture(List<String> parts, Set<String> allowedCatalogs) {
-    if (parts.size() > 1 && allowedCatalogs.contains(parts.get(0))) {
+    if (parts.size() > 1 && allowedCatalogs.contains(parts.get(0))
+        || DEFAULT_CATALOG_NAME.equals(parts.get(0))) {
       name = parts.get(0);
       return parts.subList(1, parts.size());
     } else {

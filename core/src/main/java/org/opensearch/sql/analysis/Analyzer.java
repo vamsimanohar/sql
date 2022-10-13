@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
+import org.opensearch.sql.CatalogSchemaName;
 import org.opensearch.sql.analysis.model.CatalogSchemaIdentifierName;
 import org.opensearch.sql.analysis.symbol.Namespace;
 import org.opensearch.sql.analysis.symbol.Symbol;
@@ -149,7 +150,9 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
       table = catalogService
           .getCatalog(catalogSchemaIdentifierName.getCatalogName())
           .getStorageEngine()
-          .getTable(tableName);
+          .getTable(new CatalogSchemaName(catalogSchemaIdentifierName.getCatalogName(),
+                  catalogSchemaIdentifierName.getSchemaName()),
+              catalogSchemaIdentifierName.getIdentifierName());
     }
     table.getFieldTypes().forEach((k, v) -> curEnv.define(new Symbol(Namespace.FIELD_NAME, k), v));
 
