@@ -29,7 +29,12 @@ import org.opensearch.sql.catalog.CatalogService;
 import org.opensearch.sql.catalog.model.Catalog;
 import org.opensearch.sql.catalog.model.CatalogMetadata;
 import org.opensearch.sql.catalog.model.ConnectorType;
+import org.opensearch.sql.catalog.model.auth.AuthenticationType;
+import org.opensearch.sql.catalog.model.auth.AwsSigV4AuthenticationData;
+import org.opensearch.sql.catalog.model.auth.BasicAuthenticationData;
 import org.opensearch.sql.opensearch.security.SecurityAccess;
+import org.opensearch.sql.plugin.catalog.authinterceptors.AwsSigingInterceptor;
+import org.opensearch.sql.plugin.catalog.authinterceptors.BasicAuthenticationInterceptor;
 import org.opensearch.sql.prometheus.client.PrometheusClient;
 import org.opensearch.sql.prometheus.client.PrometheusClientImpl;
 import org.opensearch.sql.prometheus.storage.PrometheusStorageEngine;
@@ -123,7 +128,7 @@ public class CatalogServiceImpl implements CatalogService {
       case PROMETHEUS:
         PrometheusClient
             prometheusClient =
-            new PrometheusClientImpl(new OkHttpClient(),
+            new PrometheusClientImpl(getHttpClient(catalog),
                 new URI(catalog.getUri()));
         storageEngine = new PrometheusStorageEngine(prometheusClient);
         break;
@@ -136,6 +141,32 @@ public class CatalogServiceImpl implements CatalogService {
             "Unknown connector. Connector doesn't exist in the list of supported.");
     }
     return storageEngine;
+  }
+
+  private OkHttpClient getHttpClient(CatalogMetadata catalog) {
+    OkHttpClient.Builder okHttpClient = new OkHttpClient.Builder();
+    if(catalog.getAuthentication() != null) {
+      switch (catalog.getAuthentication().getType()) {
+        case BASICAUTH:
+          BasicAuthenticationData basicAuthenticationData =
+              (BasicAuthenticationData) catalog.getAuthentication();
+          okHttpClient.addInterceptor(
+              new BasicAuthenticationInterceptor(basicAuthenticationData.getUsername(),
+                  basicAuthenticationData.getPassword()));
+          break;
+        case SIGV4AUTH:
+          AwsSigV4AuthenticationData awsSigV4AuthenticationData =
+              (AwsSigV4AuthenticationData) catalog.getAuthentication();
+          AwsSigingInterceptor awsSigningInterceptor = new AwsSigingInterceptor(
+              awsSigV4AuthenticationData.getAccessKey(), awsSigV4AuthenticationData.getSecretKey(),
+              awsSigV4AuthenticationData.getRegion(), "aps");
+          okHttpClient.addInterceptor(awsSigningInterceptor);
+          break;
+        default:
+          break;
+      }
+    }
+    return okHttpClient.build();
   }
 
   private void constructConnectors(List<CatalogMetadata> catalogs) throws URISyntaxException {
