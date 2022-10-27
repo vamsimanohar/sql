@@ -18,7 +18,8 @@ public class CatalogName {
   private String name = DEFAULT_CATALOG_NAME;
 
   /**
-   * Capture only if there are more parts in the name.
+   * Capture catalog name and return remaining parts(schemaname,
+   * tablename) in the fully qualified name.
    *
    * @param parts           parts.
    * @param allowedCatalogs allowedCatalogs.

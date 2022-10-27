@@ -18,7 +18,8 @@ public class SchemaName {
   private String name = DEFAULT_SCHEMA_NAME;
 
   /**
-   * Capture only if there are more parts in the name.
+   * Capture schema name and return remaining parts
+   * (tablename) in the fully qualified name.
    *
    * @param parts parts.
    * @return remaining parts.
