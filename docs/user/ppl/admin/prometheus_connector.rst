@@ -72,3 +72,16 @@ AWSSigV4 Auth::
         }
     }]
 
+PPL Query support for prometheus connector
+==========================================
+
+Metric as Table abstraction
+---------------------------
+
+
+Prometheus Connector Nuances
+----------------------------
+
+
+Example queries
+---------------

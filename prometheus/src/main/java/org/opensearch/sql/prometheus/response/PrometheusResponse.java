@@ -9,6 +9,7 @@ import static org.opensearch.sql.data.type.ExprCoreType.DOUBLE;
 import static org.opensearch.sql.data.type.ExprCoreType.INTEGER;
 import static org.opensearch.sql.data.type.ExprCoreType.LONG;
 import static org.opensearch.sql.data.type.ExprCoreType.numberTypes;
+import static org.opensearch.sql.prometheus.data.constants.PrometheusFieldConstants.LABELS;
 import static org.opensearch.sql.prometheus.data.constants.PrometheusFieldConstants.VALUE;
 
 import java.time.Instant;
@@ -36,18 +37,22 @@ public class PrometheusResponse implements Iterable<ExprValue> {
 
   private final PrometheusResponseFieldNames prometheusResponseFieldNames;
 
+  private final Boolean isQueryRangeFunctionScan;
+
   /**
    * Constructor.
    *
-   * @param responseObject Prometheus responseObject.
+   * @param responseObject               Prometheus responseObject.
    * @param prometheusResponseFieldNames data model which
-   *        contains field names for the metric measurement
-   *        and timestamp fieldName.
+   *                                     contains field names for the metric measurement
+   *                                     and timestamp fieldName.
    */
   public PrometheusResponse(JSONObject responseObject,
-                            PrometheusResponseFieldNames prometheusResponseFieldNames) {
+                            PrometheusResponseFieldNames prometheusResponseFieldNames,
+                            Boolean isQueryRangeFunctionScan) {
     this.responseObject = responseObject;
     this.prometheusResponseFieldNames = prometheusResponseFieldNames;
+    this.isQueryRangeFunctionScan = isQueryRangeFunctionScan;
   }
 
   @NonNull
@@ -67,7 +72,11 @@ public class PrometheusResponse implements Iterable<ExprValue> {
               new ExprTimestampValue(Instant.ofEpochMilli((long) (val.getDouble(0) * 1000))));
           linkedHashMap.put(prometheusResponseFieldNames.getValueFieldName(), getValue(val, 1,
               prometheusResponseFieldNames.getValueType()));
-          insertLabels(linkedHashMap, metric);
+          if (isQueryRangeFunctionScan) {
+            linkedHashMap.put(LABELS, new ExprStringValue(metric.toString()));
+          } else {
+            insertLabels(linkedHashMap, metric);
+          }
           result.add(new ExprTupleValue(linkedHashMap));
         }
       }
