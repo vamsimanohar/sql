@@ -114,6 +114,8 @@ dependencies {
     api "com.fasterxml.jackson.core:jackson-core:${jackson_version}"
     api "com.fasterxml.jackson.core:jackson-databind:${jackson_databind_version}"
     api "com.fasterxml.jackson.core:jackson-annotations:${jackson_version}"
+    implementation group: 'commons-io', name: 'commons-io', version: '2.8.0'
+
 
     api project(":ppl")
     api project(':legacy')
