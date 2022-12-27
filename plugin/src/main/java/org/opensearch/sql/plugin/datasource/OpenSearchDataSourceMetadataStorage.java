@@ -190,6 +190,7 @@ public class OpenSearchDataSourceMetadataStorage implements DataSourceMetadataSt
         propertiesMap.put(secretKey.get(),
             this.credentialInfoEncryptor.encrypt(propertiesMap.get(secretKey.get())));
         break;
+
       default:
         break;
     }

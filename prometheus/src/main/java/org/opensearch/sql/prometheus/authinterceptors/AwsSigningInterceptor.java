@@ -7,6 +7,8 @@
 
 package org.opensearch.sql.prometheus.authinterceptors;
 
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.AWSCredentialsProvider;
 import com.babbel.mobile.android.commons.okhttpawssigner.OkHttpAwsV4Signer;
 import java.io.IOException;
 import java.time.ZoneId;
@@ -21,24 +23,20 @@ public class AwsSigningInterceptor implements Interceptor {
 
   private OkHttpAwsV4Signer okHttpAwsV4Signer;
 
-  private String accessKey;
-
-  private String secretKey;
+  private AWSCredentialsProvider awsCredentialsProvider;
 
   /**
    * AwsSigningInterceptor which intercepts http requests
    * and adds required headers for sigv4 authentication.
    *
-   * @param accessKey accessKey.
-   * @param secretKey secretKey.
+   * @param awsCredentialsProvider AWSCredentialsProvider.
    * @param region region.
    * @param serviceName serviceName.
    */
-  public AwsSigningInterceptor(@NonNull String accessKey, @NonNull String secretKey,
+  public AwsSigningInterceptor(@NonNull AWSCredentialsProvider awsCredentialsProvider,
                                @NonNull String region, @NonNull String serviceName) {
     this.okHttpAwsV4Signer = new OkHttpAwsV4Signer(region, serviceName);
-    this.accessKey = accessKey;
-    this.secretKey = secretKey;
+    this.awsCredentialsProvider = awsCredentialsProvider;
   }
 
   @Override
@@ -52,7 +50,9 @@ public class AwsSigningInterceptor implements Interceptor {
         .addHeader("x-amz-date", timestampFormat.format(ZonedDateTime.now()))
         .addHeader("host", request.url().host())
         .build();
-    Request signed = okHttpAwsV4Signer.sign(newRequest, accessKey, secretKey);
+    AWSCredentials awsCredentials = awsCredentialsProvider.getCredentials();
+    Request signed = okHttpAwsV4Signer.sign(newRequest,
+        awsCredentials.getAWSAccessKeyId(), awsCredentials.getAWSSecretKey());
     return chain.proceed(signed);
   }
 
