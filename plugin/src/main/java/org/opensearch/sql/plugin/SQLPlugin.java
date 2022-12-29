@@ -189,7 +189,7 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin, Rel
                 .add(new OpenSearchDataSourceFactory(
                         new OpenSearchNodeClient(this.client), pluginSettings))
                 .add(new PrometheusStorageFactory())
-                .build());
+                .build(), client.settings().get("cluster.name", "opensearch"));
     dataSourceService.addDataSource(defaultOpenSearchDataSourceMetadata());
     LocalClusterState.state().setClusterService(clusterService);
     LocalClusterState.state().setPluginSettings((OpenSearchSettings) pluginSettings);

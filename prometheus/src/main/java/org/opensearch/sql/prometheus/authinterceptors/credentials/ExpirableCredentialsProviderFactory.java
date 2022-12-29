@@ -20,7 +20,7 @@ import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.auth.STSAssumeRoleSessionCredentialsProvider;
 import com.amazonaws.services.securitytoken.AWSSecurityTokenService;
 import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClientBuilder;
-import com.amazonaws.util.EC2MetadataUtils;
+import java.util.Arrays;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -81,14 +81,15 @@ public class ExpirableCredentialsProviderFactory implements CredentialsProviderF
   private AWSCredentialsProvider getStsAssumeCustomerRoleProvider(
       AWSCredentialsProvider apiCredentialsProvider, String roleArn) {
     String region = "us-east-1";
-    try {
-      region = EC2MetadataUtils.getEC2InstanceRegion();
-    } catch (Exception ex) {
-      LOG.info(
-          "Exception occurred while fetching the region info from EC2 metadata. "
-              + "Defaulting to us-east-1");
-    }
-
+//    try {
+//      region = EC2MetadataUtils.getEC2InstanceRegion();
+//    } catch (Throwable ex) {
+//      LOG.info(
+//          "Exception occurred while fetching the region info from EC2 metadata. "
+//              + "Defaulting to us-east-1");
+//    }
+    LOG.info("Clustername Tuple: " + Arrays.toString(clusterNameTuple));
+    LOG.info("Region" + region);
     final ClientConfiguration configurationWithConfusedDeputyHeaders =
         ClientConfigurationHelper.getConfusedDeputyConfiguration(clusterNameTuple, region);
     AWSSecurityTokenServiceClientBuilder stsClientBuilder =
@@ -97,9 +98,11 @@ public class ExpirableCredentialsProviderFactory implements CredentialsProviderF
             .withClientConfiguration(configurationWithConfusedDeputyHeaders)
             .withRegion(region);
     AWSSecurityTokenService stsClient = stsClientBuilder.build();
+    LOG.info("Built stsclient");
     STSAssumeRoleSessionCredentialsProvider.Builder providerBuilder =
-        new STSAssumeRoleSessionCredentialsProvider.Builder(roleArn, "alerting-notification")
+        new STSAssumeRoleSessionCredentialsProvider.Builder(roleArn, "sql")
             .withStsClient(stsClient);
+    LOG.info("Built credentials provider");
     return providerBuilder.build();
   }
 }

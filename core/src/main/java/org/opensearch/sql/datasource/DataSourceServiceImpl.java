@@ -34,16 +34,21 @@ public class DataSourceServiceImpl implements DataSourceService {
 
   private final DataSourceMetadataStorage dataSourceMetadataStorage;
 
+  private final String clusterName;
+
   /**
    * Construct from the set of {@link DataSourceFactory} at bootstrap time.
    */
   public DataSourceServiceImpl(DataSourceMetadataStorage dataSourceMetadataStorage,
-                               Set<DataSourceFactory> dataSourceFactories) {
+                               Set<DataSourceFactory> dataSourceFactories,
+                               String clusterName) {
     this.dataSourceMetadataStorage = dataSourceMetadataStorage;
     dataSourceFactoryMap =
         dataSourceFactories.stream()
             .collect(Collectors.toMap(DataSourceFactory::getDataSourceType, f -> f));
     dataSourceMap = new ConcurrentHashMap<>();
+    this.clusterName = clusterName;
+
   }
 
   @Override
@@ -81,7 +86,7 @@ public class DataSourceServiceImpl implements DataSourceService {
   private void loadDataSource(DataSourceMetadata metadata) {
     AccessController.doPrivileged((PrivilegedAction<DataSource>) () -> dataSourceMap.put(
         metadata,
-        dataSourceFactoryMap.get(metadata.getConnector()).createDataSource(metadata)));
+        dataSourceFactoryMap.get(metadata.getConnector()).createDataSource(metadata, clusterName)));
   }
 
   @Override

@@ -9,6 +9,7 @@ package org.opensearch.sql.prometheus.authinterceptors;
 
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSCredentialsProvider;
+import com.amazonaws.auth.STSAssumeRoleSessionCredentialsProvider;
 import com.babbel.mobile.android.commons.okhttpawssigner.OkHttpAwsV4Signer;
 import java.io.IOException;
 import java.time.ZoneId;
@@ -18,12 +19,16 @@ import lombok.NonNull;
 import okhttp3.Interceptor;
 import okhttp3.Request;
 import okhttp3.Response;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class AwsSigningInterceptor implements Interceptor {
 
   private OkHttpAwsV4Signer okHttpAwsV4Signer;
 
   private AWSCredentialsProvider awsCredentialsProvider;
+
+  private static final Logger LOG = LogManager.getLogger();
 
   /**
    * AwsSigningInterceptor which intercepts http requests
@@ -46,11 +51,21 @@ public class AwsSigningInterceptor implements Interceptor {
     DateTimeFormatter timestampFormat = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
         .withZone(ZoneId.of("GMT"));
 
-    Request newRequest = request.newBuilder()
+    Request.Builder newRequestBuilder = request.newBuilder()
         .addHeader("x-amz-date", timestampFormat.format(ZonedDateTime.now()))
-        .addHeader("host", request.url().host())
-        .build();
+        .addHeader("host", request.url().host());
     AWSCredentials awsCredentials = awsCredentialsProvider.getCredentials();
+
+    if (awsCredentialsProvider instanceof STSAssumeRoleSessionCredentialsProvider) {
+      newRequestBuilder.addHeader("x-amz-security-token",
+          ((STSAssumeRoleSessionCredentialsProvider) awsCredentialsProvider).getCredentials().getSessionToken());
+      LOG.info("x-amz-security-token: {}",
+          ((STSAssumeRoleSessionCredentialsProvider) awsCredentialsProvider).getCredentials().getSessionToken());
+    }
+    Request newRequest = newRequestBuilder.build();
+    LOG.info(awsCredentialsProvider.getClass());
+    LOG.info("Access Key: {}", awsCredentials.getAWSAccessKeyId());
+    LOG.info("Secret Key: {}", awsCredentials.getAWSSecretKey());
     Request signed = okHttpAwsV4Signer.sign(newRequest,
         awsCredentials.getAWSAccessKeyId(), awsCredentials.getAWSSecretKey());
     return chain.proceed(signed);
