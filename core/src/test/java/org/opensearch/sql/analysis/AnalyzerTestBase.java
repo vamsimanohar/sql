@@ -12,6 +12,7 @@ import static org.opensearch.sql.data.type.ExprCoreType.STRING;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -167,17 +168,17 @@ public class AnalyzerTestBase {
     @Override
     public Set<DataSourceMetadata> getDataSourceMetadataSet() {
       return ImmutableSet.of(new DataSourceMetadata(dataSource.getName(),
-          dataSource.getConnectorType(), ImmutableMap.of()));
+          dataSource.getConnectorType(), Collections.emptyList(), ImmutableMap.of()));
+    }
+
+    @Override
+    public void createDataSource(DataSourceMetadata metadata) {
+      throw new UnsupportedOperationException("unsupported operation");
     }
 
     @Override
     public DataSource getDataSource(String dataSourceName) {
       return dataSource;
-    }
-
-    @Override
-    public void createDataSource(DataSourceMetadata... metadatas) {
-      throw new UnsupportedOperationException();
     }
 
     @Override
@@ -187,17 +188,6 @@ public class AnalyzerTestBase {
 
     @Override
     public void deleteDataSource(String dataSourceName) {
-
-    }
-
-    @Override
-    public void bootstrapDataSources() {
-
-    }
-
-    @Override
-    public void clear() {
-      throw new UnsupportedOperationException();
     }
   }
 
