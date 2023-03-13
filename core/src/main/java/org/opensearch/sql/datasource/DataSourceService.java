@@ -29,7 +29,16 @@ public interface DataSourceService {
    *
    * @return set of {@link DataSourceMetadata}.
    */
-  Set<DataSourceMetadata> getDataSourceMetadataSet();
+  Set<DataSourceMetadata> getDataSourceMetadataSet(Boolean isDefaultRequired);
+
+
+  /**
+   * Returns dataSourceMetadata object with specific name.
+   * The returned objects won't contain any crendetial info.
+   *
+   * @return set of {@link DataSourceMetadata}.
+   */
+  DataSourceMetadata getDataSourceMetadataSet(String name);
 
   /**
    * Register {@link DataSource} defined by {@link DataSourceMetadata}.

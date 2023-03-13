@@ -67,7 +67,13 @@ class DataSourceServiceImplTest {
               {
                 add(dataSourceFactory);
               }
-            }, dataSourceMetadataStorage);
+            }, dataSourceMetadataStorage,
+            new DataSourceAuthorizer() {
+              @Override
+              public void authorize(DataSourceMetadata dataSourceMetadata) {
+
+              }
+            });
   }
 
   @Test
@@ -186,7 +192,7 @@ class DataSourceServiceImplTest {
         }
       });
     Set<DataSourceMetadata> dataSourceMetadataSet
-        = dataSourceService.getDataSourceMetadataSet();
+        = dataSourceService.getDataSourceMetadataSet(false);
     assertEquals(2, dataSourceMetadataSet.size());
     assertTrue(dataSourceMetadataSet
         .contains(DataSourceMetadata.defaultOpenSearchDataSourceMetadata()));

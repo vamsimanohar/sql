@@ -13,6 +13,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import lombok.AllArgsConstructor;
@@ -50,7 +51,7 @@ public class DataSourceMetadata {
    */
   public static DataSourceMetadata defaultOpenSearchDataSourceMetadata() {
     return new DataSourceMetadata(DEFAULT_DATASOURCE_NAME,
-        DataSourceType.OPENSEARCH, null, ImmutableMap.of());
+        DataSourceType.OPENSEARCH, Collections.emptyList(), ImmutableMap.of());
   }
 
 }

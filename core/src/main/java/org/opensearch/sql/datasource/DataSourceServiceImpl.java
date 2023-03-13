@@ -41,26 +41,43 @@ public class DataSourceServiceImpl implements DataSourceService {
 
   private final DataSourceMetadataStorage dataSourceMetadataStorage;
 
+  private final DataSourceAuthorizer dataSourceAuthorizer;
+
 
   /**
    * Construct from the set of {@link DataSourceFactory} at bootstrap time.
    */
   public DataSourceServiceImpl(Set<DataSourceFactory> dataSourceFactories,
-                               DataSourceMetadataStorage dataSourceMetadataStorage) {
+                               DataSourceMetadataStorage dataSourceMetadataStorage,
+                               DataSourceAuthorizer dataSourceAuthorizer) {
     dataSourceFactoryMap =
         dataSourceFactories.stream()
             .collect(Collectors.toMap(DataSourceFactory::getDataSourceType, f -> f));
     dataSourceMap = new ConcurrentHashMap<>();
     this.dataSourceMetadataStorage = dataSourceMetadataStorage;
+    this.dataSourceAuthorizer = dataSourceAuthorizer;
   }
 
   @Override
-  public Set<DataSourceMetadata> getDataSourceMetadataSet() {
+  public Set<DataSourceMetadata> getDataSourceMetadataSet(Boolean isDefaultRequired) {
     List<DataSourceMetadata> dataSourceMetadataList
         = this.dataSourceMetadataStorage.getDataSourceMetadata();
     Set<DataSourceMetadata> dataSourceMetadataSet = new HashSet<>(dataSourceMetadataList);
-    dataSourceMetadataSet.add(DataSourceMetadata.defaultOpenSearchDataSourceMetadata());
+    if (isDefaultRequired) {
+      dataSourceMetadataSet.add(DataSourceMetadata.defaultOpenSearchDataSourceMetadata());
+    }
     return dataSourceMetadataSet;
+  }
+
+  @Override
+  public DataSourceMetadata getDataSourceMetadataSet(String datasourceName) {
+    Optional<DataSourceMetadata> dataSourceMetadataOptional
+        = this.dataSourceMetadataStorage.getDataSourceMetadata(datasourceName);
+    if (dataSourceMetadataOptional.isEmpty()) {
+      throw new IllegalArgumentException("Datasource with name: " + datasourceName
+          + " doesn't exist");
+    }
+    return dataSourceMetadataOptional.get();
   }
 
 
@@ -68,11 +85,11 @@ public class DataSourceServiceImpl implements DataSourceService {
   public DataSource getDataSource(String dataSourceName) {
     Optional<DataSourceMetadata>
         dataSourceMetadataOptional = getDataSourceMetadata(dataSourceName);
-
     if (dataSourceMetadataOptional.isEmpty()) {
       throw new IllegalArgumentException(
           String.format("DataSource with name %s doesn't exist.", dataSourceName));
     } else {
+      this.dataSourceAuthorizer.authorize(dataSourceMetadataOptional.get());
       return getDataSourceFromMetadata(dataSourceMetadataOptional.get());
     }
   }
@@ -89,12 +106,28 @@ public class DataSourceServiceImpl implements DataSourceService {
 
   @Override
   public void updateDataSource(DataSourceMetadata dataSourceMetadata) {
-    throw new UnsupportedOperationException("will be supported in future");
+    validateDataSourceMetaData(dataSourceMetadata);
+    if (dataSourceMetadata.getName().equals(DEFAULT_DATASOURCE_NAME)) {
+      throw new UnsupportedOperationException(
+          "Not allowed to update default datasource :" + DEFAULT_DATASOURCE_NAME);
+    } else {
+      this.dataSourceMetadataStorage.updateDataSourceMetadata(dataSourceMetadata);
+    }
+    clearDataSourceWithSameName(dataSourceMetadata.getName());
+    dataSourceMap.put(dataSourceMetadata,
+        dataSourceFactoryMap.get(dataSourceMetadata.getConnector())
+            .createDataSource(dataSourceMetadata));
   }
 
   @Override
   public void deleteDataSource(String dataSourceName) {
-    throw new UnsupportedOperationException("will be supported in future");
+    if (dataSourceName.equals(DEFAULT_DATASOURCE_NAME)) {
+      throw new UnsupportedOperationException(
+          "Not allowed to delete default datasource :" + DEFAULT_DATASOURCE_NAME);
+    } else {
+      this.dataSourceMetadataStorage.deleteDataSourceMetadata(dataSourceName);
+      clearDataSourceWithSameName(dataSourceName);
+    }
   }
 
 
@@ -128,7 +161,7 @@ public class DataSourceServiceImpl implements DataSourceService {
 
   private DataSource getDataSourceFromMetadata(DataSourceMetadata dataSourceMetadata) {
     if (!dataSourceMap.containsKey(dataSourceMetadata)) {
-      clearDataSource(dataSourceMetadata);
+      clearDataSourceWithSameName(dataSourceMetadata.getName());
       dataSourceMap.put(dataSourceMetadata,
           dataSourceFactoryMap.get(dataSourceMetadata.getConnector())
               .createDataSource(dataSourceMetadata));
@@ -136,9 +169,9 @@ public class DataSourceServiceImpl implements DataSourceService {
     return dataSourceMap.get(dataSourceMetadata);
   }
 
-  private void clearDataSource(DataSourceMetadata dataSourceMetadata) {
+  private void clearDataSourceWithSameName(String dataSourceName) {
     dataSourceMap.entrySet()
-        .removeIf(entry -> entry.getKey().getName().equals(dataSourceMetadata.getName()));
+        .removeIf(entry -> entry.getKey().getName().equals(dataSourceName));
   }
 
 }

@@ -134,7 +134,7 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
   @Override
   public LogicalPlan visitRelation(Relation node, AnalysisContext context) {
     QualifiedName qualifiedName = node.getTableQualifiedName();
-    Set<String> allowedDataSourceNames = dataSourceService.getDataSourceMetadataSet()
+    Set<String> allowedDataSourceNames = dataSourceService.getDataSourceMetadataSet(true)
         .stream()
         .map(DataSourceMetadata::getName)
         .collect(Collectors.toSet());
@@ -182,7 +182,7 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
   @Override
   public LogicalPlan visitTableFunction(TableFunction node, AnalysisContext context) {
     QualifiedName qualifiedName = node.getFunctionName();
-    Set<String> allowedDataSourceNames = dataSourceService.getDataSourceMetadataSet()
+    Set<String> allowedDataSourceNames = dataSourceService.getDataSourceMetadataSet(true)
         .stream()
         .map(DataSourceMetadata::getName)
         .collect(Collectors.toSet());

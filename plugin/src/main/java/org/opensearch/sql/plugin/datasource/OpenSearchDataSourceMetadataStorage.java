@@ -24,10 +24,14 @@ import org.opensearch.action.ActionFuture;
 import org.opensearch.action.DocWriteResponse;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
+import org.opensearch.action.delete.DeleteRequest;
+import org.opensearch.action.delete.DeleteResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
+import org.opensearch.action.update.UpdateRequest;
+import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.util.concurrent.ThreadContext;
@@ -115,12 +119,37 @@ public class OpenSearchDataSourceMetadataStorage implements DataSourceMetadataSt
 
   @Override
   public void updateDataSourceMetadata(DataSourceMetadata dataSourceMetadata) {
-    throw new UnsupportedOperationException("will be supported in future.");
+    encryptConfidentialData(dataSourceMetadata);
+    UpdateRequest updateRequest
+        = new UpdateRequest(DATASOURCE_INDEX_NAME, dataSourceMetadata.getName());
+    ObjectMapper objectMapper = new ObjectMapper();
+    ActionFuture<UpdateResponse> updateResponseActionFuture;
+    try (ThreadContext.StoredContext storedContext = client.threadPool().getThreadContext()
+        .stashContext()) {
+      updateRequest.doc(objectMapper.writeValueAsString(dataSourceMetadata), XContentType.JSON);
+      updateResponseActionFuture = client.update(updateRequest);
+    } catch (JsonProcessingException e) {
+      throw new RuntimeException(e);
+    }
+    UpdateResponse updateResponse = updateResponseActionFuture.actionGet();
+    if (updateResponse.getResult().equals(DocWriteResponse.Result.UPDATED)) {
+      LOG.debug("DatasourceMetadata : {}  successfully updated", dataSourceMetadata.getName());
+    }
   }
 
   @Override
   public void deleteDataSourceMetadata(String datasourceName) {
-    throw new UnsupportedOperationException("will be supported in future.");
+    DeleteRequest deleteRequest = new DeleteRequest(DATASOURCE_INDEX_NAME);
+    deleteRequest.id(datasourceName);
+    ActionFuture<DeleteResponse> deleteResponseActionFuture;
+    try (ThreadContext.StoredContext storedContext = client.threadPool().getThreadContext()
+        .stashContext()) {
+       deleteResponseActionFuture = client.delete(deleteRequest);
+    }
+    DeleteResponse deleteResponse = deleteResponseActionFuture.actionGet();
+    if(deleteResponse.getResult().equals(DocWriteResponse.Result.DELETED)) {
+      LOG.debug("DatasourceMetadata : {}  successfully deleted", datasourceName);
+    }
   }
 
   private void createDataSourcesIndex() {

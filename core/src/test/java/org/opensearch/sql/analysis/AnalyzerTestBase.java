@@ -166,9 +166,14 @@ public class AnalyzerTestBase {
 
 
     @Override
-    public Set<DataSourceMetadata> getDataSourceMetadataSet() {
+    public Set<DataSourceMetadata> getDataSourceMetadataSet(Boolean isDefaultRequired) {
       return ImmutableSet.of(new DataSourceMetadata(dataSource.getName(),
           dataSource.getConnectorType(), Collections.emptyList(), ImmutableMap.of()));
+    }
+
+    @Override
+    public DataSourceMetadata getDataSourceMetadataSet(String name) {
+      return null;
     }
 
     @Override

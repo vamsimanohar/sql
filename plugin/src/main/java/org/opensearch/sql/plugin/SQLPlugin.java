@@ -47,6 +47,7 @@ import org.opensearch.script.ScriptContext;
 import org.opensearch.script.ScriptEngine;
 import org.opensearch.script.ScriptService;
 import org.opensearch.sql.common.encryptor.EncryptorImpl;
+import org.opensearch.sql.datasource.DataSourceAuthorizer;
 import org.opensearch.sql.datasource.DataSourceMetadataStorage;
 import org.opensearch.sql.datasource.DataSourceService;
 import org.opensearch.sql.datasource.DataSourceServiceImpl;
@@ -62,9 +63,13 @@ import org.opensearch.sql.opensearch.storage.OpenSearchDataSourceFactory;
 import org.opensearch.sql.opensearch.storage.script.ExpressionScriptEngine;
 import org.opensearch.sql.opensearch.storage.serialization.DefaultExpressionSerializer;
 import org.opensearch.sql.plugin.config.OpenSearchPluginModule;
+import org.opensearch.sql.plugin.datasource.DataSourceAuthorizerImpl;
 import org.opensearch.sql.plugin.datasource.DataSourceSettings;
 import org.opensearch.sql.plugin.datasource.OpenSearchDataSourceMetadataStorage;
 import org.opensearch.sql.plugin.model.CreateDataSourceActionResponse;
+import org.opensearch.sql.plugin.model.DeleteDataSourceActionResponse;
+import org.opensearch.sql.plugin.model.GetDataSourceActionResponse;
+import org.opensearch.sql.plugin.model.UpdateDataSourceActionResponse;
 import org.opensearch.sql.plugin.rest.RestDataSourceQueryAction;
 import org.opensearch.sql.plugin.rest.RestPPLQueryAction;
 import org.opensearch.sql.plugin.rest.RestPPLStatsAction;
@@ -73,6 +78,9 @@ import org.opensearch.sql.plugin.transport.PPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
 import org.opensearch.sql.plugin.transport.datasource.TransportCreateDataSourceAction;
+import org.opensearch.sql.plugin.transport.datasource.TransportDeleteDataSourceAction;
+import org.opensearch.sql.plugin.transport.datasource.TransportGetDataSourceAction;
+import org.opensearch.sql.plugin.transport.datasource.TransportUpdateDataSourceAction;
 import org.opensearch.sql.prometheus.storage.PrometheusStorageFactory;
 import org.opensearch.sql.storage.DataSourceFactory;
 import org.opensearch.threadpool.ExecutorBuilder;
@@ -134,7 +142,13 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin {
             new ActionType<>(PPLQueryAction.NAME, TransportPPLQueryResponse::new),
             TransportPPLQueryAction.class),
         new ActionHandler<>(new ActionType<>(TransportCreateDataSourceAction.NAME,
-            CreateDataSourceActionResponse::new), TransportCreateDataSourceAction.class));
+            CreateDataSourceActionResponse::new), TransportCreateDataSourceAction.class),
+        new ActionHandler<>(new ActionType<>(TransportGetDataSourceAction.NAME,
+            GetDataSourceActionResponse::new), TransportGetDataSourceAction.class),
+        new ActionHandler<>(new ActionType<>(TransportUpdateDataSourceAction.NAME,
+            UpdateDataSourceActionResponse::new), TransportUpdateDataSourceAction.class),
+        new ActionHandler<>(new ActionType<>(TransportDeleteDataSourceAction.NAME,
+            DeleteDataSourceActionResponse::new), TransportDeleteDataSourceAction.class));
   }
 
   @Override
@@ -158,6 +172,7 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin {
     DataSourceMetadataStorage dataSourceMetadataStorage
         = new OpenSearchDataSourceMetadataStorage(client, clusterService,
             new EncryptorImpl(masterKey));
+    DataSourceAuthorizer dataSourceAuthorizer = new DataSourceAuthorizerImpl(client);
     this.dataSourceService =
         new DataSourceServiceImpl(
             new ImmutableSet.Builder<DataSourceFactory>()
@@ -165,7 +180,8 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin {
                     new OpenSearchNodeClient(this.client), pluginSettings))
                 .add(new PrometheusStorageFactory())
                 .build(),
-            dataSourceMetadataStorage);
+            dataSourceMetadataStorage,
+            dataSourceAuthorizer);
     dataSourceService.createDataSource(defaultOpenSearchDataSourceMetadata());
     LocalClusterState.state().setClusterService(clusterService);
     LocalClusterState.state().setPluginSettings((OpenSearchSettings) pluginSettings);
