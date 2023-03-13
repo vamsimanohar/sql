@@ -5,6 +5,7 @@
 
 package org.opensearch.sql.opensearch.storage;
 
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.datasource.model.DataSource;
