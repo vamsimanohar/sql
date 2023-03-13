@@ -5,9 +5,12 @@
 
 package org.opensearch.sql.opensearch.storage;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
 
+import com.google.common.collect.ImmutableMap;
+import javax.annotation.concurrent.Immutable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -47,5 +50,13 @@ class OpenSearchDataSourceFactoryTest {
     DataSource dataSource = factory.createDataSource(dataSourceMetadata);
     assertEquals("opensearch", dataSource.getName());
     assertEquals(DataSourceType.OPENSEARCH, dataSource.getConnectorType());
+  }
+
+  @Test
+  void testValidate() {
+    when(dataSourceMetadata.getProperties()).thenReturn(ImmutableMap.of());
+    assertDoesNotThrow(
+        () -> factory.validateDataSourceConfigProperties(dataSourceMetadata.getProperties()));
+
   }
 }

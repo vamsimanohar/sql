@@ -67,6 +67,9 @@ import org.opensearch.sql.plugin.datasource.DataSourceSettings;
 import org.opensearch.sql.plugin.datasource.DataSourceUserAuthorizationHelperImpl;
 import org.opensearch.sql.plugin.datasource.OpenSearchDataSourceMetadataStorage;
 import org.opensearch.sql.plugin.model.CreateDataSourceActionResponse;
+import org.opensearch.sql.plugin.model.DeleteDataSourceActionResponse;
+import org.opensearch.sql.plugin.model.GetDataSourceActionResponse;
+import org.opensearch.sql.plugin.model.UpdateDataSourceActionResponse;
 import org.opensearch.sql.plugin.rest.RestDataSourceQueryAction;
 import org.opensearch.sql.plugin.rest.RestPPLQueryAction;
 import org.opensearch.sql.plugin.rest.RestPPLStatsAction;
@@ -75,6 +78,9 @@ import org.opensearch.sql.plugin.transport.PPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryAction;
 import org.opensearch.sql.plugin.transport.TransportPPLQueryResponse;
 import org.opensearch.sql.plugin.transport.datasource.TransportCreateDataSourceAction;
+import org.opensearch.sql.plugin.transport.datasource.TransportDeleteDataSourceAction;
+import org.opensearch.sql.plugin.transport.datasource.TransportGetDataSourceAction;
+import org.opensearch.sql.plugin.transport.datasource.TransportUpdateDataSourceAction;
 import org.opensearch.sql.prometheus.storage.PrometheusStorageFactory;
 import org.opensearch.sql.storage.DataSourceFactory;
 import org.opensearch.threadpool.ExecutorBuilder;
@@ -136,7 +142,13 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin {
             new ActionType<>(PPLQueryAction.NAME, TransportPPLQueryResponse::new),
             TransportPPLQueryAction.class),
         new ActionHandler<>(new ActionType<>(TransportCreateDataSourceAction.NAME,
-            CreateDataSourceActionResponse::new), TransportCreateDataSourceAction.class));
+            CreateDataSourceActionResponse::new), TransportCreateDataSourceAction.class),
+        new ActionHandler<>(new ActionType<>(TransportGetDataSourceAction.NAME,
+            GetDataSourceActionResponse::new), TransportGetDataSourceAction.class),
+        new ActionHandler<>(new ActionType<>(TransportUpdateDataSourceAction.NAME,
+            UpdateDataSourceActionResponse::new), TransportUpdateDataSourceAction.class),
+        new ActionHandler<>(new ActionType<>(TransportDeleteDataSourceAction.NAME,
+            DeleteDataSourceActionResponse::new), TransportDeleteDataSourceAction.class));
   }
 
   @Override

@@ -5,6 +5,7 @@
 
 package org.opensearch.sql.opensearch.storage;
 
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.opensearch.sql.common.setting.Settings;
 import org.opensearch.sql.datasource.model.DataSource;
@@ -30,5 +31,9 @@ public class OpenSearchDataSourceFactory implements DataSourceFactory {
   public DataSource createDataSource(DataSourceMetadata metadata) {
     return new DataSource(metadata.getName(), DataSourceType.OPENSEARCH,
         new OpenSearchStorageEngine(client, settings));
+  }
+
+  @Override
+  public void validateDataSourceConfigProperties(Map<String, String> dataSourceMetadataConfig) {
   }
 }

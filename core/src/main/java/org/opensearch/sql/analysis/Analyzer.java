@@ -211,7 +211,7 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
         .defaultOpenSearchDataSourceMetadata()
         .getName());
     if (qualifiedName.getParts().size() != 1) {
-      allowedDataSourceNames = dataSourceService.getDataSourceMetadataSet()
+      allowedDataSourceNames = dataSourceService.getDataSourceMetadataSet(true)
           .stream()
           .map(DataSourceMetadata::getName)
           .collect(Collectors.toSet());

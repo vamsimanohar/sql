@@ -4,6 +4,8 @@ package org.opensearch.sql.datasource;/*
  */
 
 
+import static org.opensearch.sql.legacy.TestUtils.getResponseBody;
+
 import com.google.gson.Gson;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -13,6 +15,7 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.opensearch.client.Request;
 import org.opensearch.client.RequestOptions;
+import org.opensearch.client.Response;
 import org.opensearch.sql.datasource.model.DataSourceMetadata;
 import org.opensearch.sql.datasource.model.DataSourceType;
 import org.opensearch.sql.ppl.PPLIntegTestCase;
@@ -22,8 +25,10 @@ public class DataSourceAPIsIT extends PPLIntegTestCase {
   @Test
   public void createDataSourceTest() throws IOException {
     Request request = getCreateDataSourceRequest(getDataSourceMetadataJsonString());
-    String response = executeRequest(request);
-    Assert.assertEquals("Created DataSource with name prometheus1", response);
+    Response response = client().performRequest(request);
+    Assert.assertEquals(201, response.getStatusLine().getStatusCode());
+    String responseString = getResponseBody(response);
+    Assert.assertEquals("Created DataSource with name prometheus1", responseString);
   }
 
   private Request getCreateDataSourceRequest(String dataSourceMetadataJson) {

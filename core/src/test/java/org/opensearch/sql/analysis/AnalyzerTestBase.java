@@ -185,11 +185,16 @@ public class AnalyzerTestBase {
 
 
     @Override
-    public Set<DataSourceMetadata> getDataSourceMetadataSet() {
+    public Set<DataSourceMetadata> getDataSourceMetadataSet(Boolean isDefaultRequired) {
       return Stream.of(opensearchDataSource, prometheusDataSource)
           .map(ds -> new DataSourceMetadata(ds.getName(),
               ds.getConnectorType(),Collections.emptyList(),
               ImmutableMap.of())).collect(Collectors.toSet());
+    }
+
+    @Override
+    public DataSourceMetadata getDataSourceMetadataSet(String name) {
+      return null;
     }
 
     @Override

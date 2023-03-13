@@ -52,8 +52,22 @@ public class PrometheusStorageFactory implements DataSourceFactory {
         getStorageEngine(metadata.getName(), metadata.getProperties()));
   }
 
+  @Override
+  public void validateDataSourceConfigProperties(Map<String, String> dataSourceMetadataConfig) {
+    validateFieldsInConfig(dataSourceMetadataConfig, Set.of(URI));
+    if (dataSourceMetadataConfig.get(AUTH_TYPE) != null) {
+      AuthenticationType authenticationType
+          = AuthenticationType.get(dataSourceMetadataConfig.get(AUTH_TYPE));
+      if (AuthenticationType.BASICAUTH.equals(authenticationType)) {
+        validateFieldsInConfig(dataSourceMetadataConfig, Set.of(USERNAME, PASSWORD));
+      } else if (AuthenticationType.AWSSIGV4AUTH.equals(authenticationType)) {
+        validateFieldsInConfig(dataSourceMetadataConfig, Set.of(ACCESS_KEY, SECRET_KEY, REGION));
+      }
+    }
+  }
+
   StorageEngine getStorageEngine(String catalogName, Map<String, String> requiredConfig) {
-    validateFieldsInConfig(requiredConfig, Set.of(URI));
+    validateDataSourceConfigProperties(requiredConfig);
     PrometheusClient prometheusClient;
     prometheusClient =
         AccessController.doPrivileged((PrivilegedAction<PrometheusClientImpl>) () -> {
@@ -76,11 +90,9 @@ public class PrometheusStorageFactory implements DataSourceFactory {
     if (config.get(AUTH_TYPE) != null) {
       AuthenticationType authenticationType = AuthenticationType.get(config.get(AUTH_TYPE));
       if (AuthenticationType.BASICAUTH.equals(authenticationType)) {
-        validateFieldsInConfig(config, Set.of(USERNAME, PASSWORD));
         okHttpClient.addInterceptor(new BasicAuthenticationInterceptor(config.get(USERNAME),
             config.get(PASSWORD)));
       } else if (AuthenticationType.AWSSIGV4AUTH.equals(authenticationType)) {
-        validateFieldsInConfig(config, Set.of(REGION, ACCESS_KEY, SECRET_KEY));
         okHttpClient.addInterceptor(new AwsSigningInterceptor(
             new AWSStaticCredentialsProvider(
                 new BasicAWSCredentials(config.get(ACCESS_KEY), config.get(SECRET_KEY))),

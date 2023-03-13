@@ -9,6 +9,7 @@ import static org.opensearch.sql.analysis.DataSourceSchemaIdentifierNameResolver
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import org.opensearch.sql.common.utils.StringUtils;
+import org.opensearch.sql.datasource.exceptions.DataSourceNotFoundException;
 import org.opensearch.sql.datasource.model.DataSource;
 import org.opensearch.sql.datasource.model.DataSourceMetadata;
 import org.opensearch.sql.datasource.model.DataSourceType;
@@ -59,12 +61,25 @@ public class DataSourceServiceImpl implements DataSourceService {
   }
 
   @Override
-  public Set<DataSourceMetadata> getDataSourceMetadataSet() {
+  public Set<DataSourceMetadata> getDataSourceMetadataSet(Boolean isDefaultRequired) {
     List<DataSourceMetadata> dataSourceMetadataList
         = this.dataSourceMetadataStorage.getDataSourceMetadata();
     Set<DataSourceMetadata> dataSourceMetadataSet = new HashSet<>(dataSourceMetadataList);
-    dataSourceMetadataSet.add(DataSourceMetadata.defaultOpenSearchDataSourceMetadata());
-    return dataSourceMetadataSet;
+    if (isDefaultRequired) {
+      dataSourceMetadataSet.add(DataSourceMetadata.defaultOpenSearchDataSourceMetadata());
+    }
+    return removeAuthInfo(dataSourceMetadataSet);
+  }
+
+  @Override
+  public DataSourceMetadata getDataSourceMetadataSet(String datasourceName) {
+    Optional<DataSourceMetadata> dataSourceMetadataOptional
+        = this.dataSourceMetadataStorage.getDataSourceMetadata(datasourceName);
+    if (dataSourceMetadataOptional.isEmpty()) {
+      throw new IllegalArgumentException("DataSource with name: " + datasourceName
+          + " doesn't exist.");
+    }
+    return removeAuthInfo(dataSourceMetadataOptional.get());
   }
 
 
@@ -73,7 +88,7 @@ public class DataSourceServiceImpl implements DataSourceService {
     Optional<DataSourceMetadata>
         dataSourceMetadataOptional = getDataSourceMetadata(dataSourceName);
     if (dataSourceMetadataOptional.isEmpty()) {
-      throw new IllegalArgumentException(
+      throw new DataSourceNotFoundException(
           String.format("DataSource with name %s doesn't exist.", dataSourceName));
     } else {
       DataSourceMetadata dataSourceMetadata = dataSourceMetadataOptional.get();
@@ -94,12 +109,28 @@ public class DataSourceServiceImpl implements DataSourceService {
 
   @Override
   public void updateDataSource(DataSourceMetadata dataSourceMetadata) {
-    throw new UnsupportedOperationException("will be supported in future");
+    validateDataSourceMetaData(dataSourceMetadata);
+    if (dataSourceMetadata.getName().equals(DEFAULT_DATASOURCE_NAME)) {
+      throw new UnsupportedOperationException(
+          "Not allowed to update default datasource :" + DEFAULT_DATASOURCE_NAME);
+    } else {
+      this.dataSourceMetadataStorage.updateDataSourceMetadata(dataSourceMetadata);
+    }
+    clearDataSourceWithSameName(dataSourceMetadata.getName());
+    dataSourceMap.put(dataSourceMetadata,
+        dataSourceFactoryMap.get(dataSourceMetadata.getConnector())
+            .createDataSource(dataSourceMetadata));
   }
 
   @Override
   public void deleteDataSource(String dataSourceName) {
-    throw new UnsupportedOperationException("will be supported in future");
+    if (dataSourceName.equals(DEFAULT_DATASOURCE_NAME)) {
+      throw new UnsupportedOperationException(
+          "Not allowed to delete default datasource :" + DEFAULT_DATASOURCE_NAME);
+    } else {
+      this.dataSourceMetadataStorage.deleteDataSourceMetadata(dataSourceName);
+      clearDataSourceWithSameName(dataSourceName);
+    }
   }
 
 
@@ -121,6 +152,8 @@ public class DataSourceServiceImpl implements DataSourceService {
         !Objects.isNull(metadata.getProperties()),
         "Missing properties field in datasource configuration."
             + " Properties are required parameters.");
+    this.dataSourceFactoryMap.get(metadata.getConnector())
+        .validateDataSourceConfigProperties(metadata.getProperties());
   }
 
   private Optional<DataSourceMetadata> getDataSourceMetadata(String dataSourceName) {
@@ -133,7 +166,7 @@ public class DataSourceServiceImpl implements DataSourceService {
 
   private DataSource getDataSourceFromMetadata(DataSourceMetadata dataSourceMetadata) {
     if (!dataSourceMap.containsKey(dataSourceMetadata)) {
-      clearDataSource(dataSourceMetadata);
+      clearDataSourceWithSameName(dataSourceMetadata.getName());
       dataSourceMap.put(dataSourceMetadata,
           dataSourceFactoryMap.get(dataSourceMetadata.getConnector())
               .createDataSource(dataSourceMetadata));
@@ -141,9 +174,9 @@ public class DataSourceServiceImpl implements DataSourceService {
     return dataSourceMap.get(dataSourceMetadata);
   }
 
-  private void clearDataSource(DataSourceMetadata dataSourceMetadata) {
+  private void clearDataSourceWithSameName(String dataSourceName) {
     dataSourceMap.entrySet()
-        .removeIf(entry -> entry.getKey().getName().equals(dataSourceMetadata.getName()));
+        .removeIf(entry -> entry.getKey().getName().equals(dataSourceName));
   }
 
   private void authorizeDataSource(DataSourceMetadata dataSourceMetadata) {
@@ -164,6 +197,27 @@ public class DataSourceServiceImpl implements DataSourceService {
                 dataSourceMetadata.getName(), dataSourceMetadata.getAllowedRoles().toString()));
       }
     }
+  }
+
+
+  private Set<DataSourceMetadata> removeAuthInfo(Set<DataSourceMetadata> dataSourceMetadataSet) {
+    return dataSourceMetadataSet.stream()
+        .map(this::removeAuthInfo)
+        .collect(Collectors.toSet());
+  }
+
+  private DataSourceMetadata removeAuthInfo(DataSourceMetadata dataSourceMetadata) {
+    HashMap<String, String> filteredPropertiesMap = new HashMap<>();
+    dataSourceMetadata.getProperties().entrySet()
+      .stream()
+      .filter(entry -> !entry.getKey().contains("auth"))
+      .forEach(entry -> filteredPropertiesMap.put(entry.getKey(), entry.getValue()));
+    DataSourceMetadata result = new DataSourceMetadata();
+    result.setName(dataSourceMetadata.getName());
+    result.setConnector(dataSourceMetadata.getConnector());
+    result.setAllowedRoles(dataSourceMetadata.getAllowedRoles());
+    result.setProperties(filteredPropertiesMap);
+    return result;
   }
 
 }
