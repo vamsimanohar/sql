@@ -16,6 +16,7 @@ import org.opensearch.client.node.NodeClient;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.sql.datasource.DataSourceService;
 import org.opensearch.sql.datasource.DataSourceServiceImpl;
+import org.opensearch.sql.datasource.model.DataSourceInterfaceType;
 import org.opensearch.sql.legacy.metrics.MetricName;
 import org.opensearch.sql.legacy.metrics.Metrics;
 import org.opensearch.sql.opensearch.security.SecurityAccess;
@@ -56,6 +57,13 @@ public class TransportDeleteDataSourceAction
   @Override
   protected void doExecute(Task task, DeleteDataSourceActionRequest request,
                            ActionListener<DeleteDataSourceActionResponse> actionListener) {
+    if (dataSourceService.datasourceInterfaceType()
+        .equals(DataSourceInterfaceType.KEYSTORE)) {
+      throw new UnsupportedOperationException(
+          "Please set datasource interface settings(plugins.query.federation.datasources.interface)"
+              + "to api in opensearch.yml to enable apis for datasource management. "
+              + "Please port any datasources configured in keystore using create api.");
+    }
     Metrics.getInstance().getNumericalMetric(MetricName.DATASOURCE_REQ_COUNT).increment();
     dataSourceService.deleteDataSource(request.getDataSourceName());
     actionListener.onResponse(new DeleteDataSourceActionResponse("Deleted DataSource with name "

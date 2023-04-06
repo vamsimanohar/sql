@@ -19,6 +19,7 @@ import org.opensearch.client.node.NodeClient;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.sql.datasource.DataSourceService;
 import org.opensearch.sql.datasource.DataSourceServiceImpl;
+import org.opensearch.sql.datasource.model.DataSourceInterfaceType;
 import org.opensearch.sql.datasource.model.DataSourceMetadata;
 import org.opensearch.sql.plugin.model.GetDataSourceActionRequest;
 import org.opensearch.sql.plugin.model.GetDataSourceActionResponse;
@@ -58,6 +59,13 @@ public class TransportGetDataSourceAction
   @Override
   protected void doExecute(Task task, GetDataSourceActionRequest request,
                            ActionListener<GetDataSourceActionResponse> actionListener) {
+    if (dataSourceService.datasourceInterfaceType()
+        .equals(DataSourceInterfaceType.KEYSTORE)) {
+      throw new UnsupportedOperationException(
+          "Please set datasource interface settings(plugins.query.federation.datasources.interface)"
+              + "to api in opensearch.yml to enable apis for datasource management. "
+              + "Please port any datasources configured in keystore using create api.");
+    }
     try {
       String responseContent;
       if (request.getDataSourceName() == null) {

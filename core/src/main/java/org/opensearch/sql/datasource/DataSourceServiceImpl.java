@@ -25,6 +25,7 @@ import javax.xml.crypto.Data;
 import org.opensearch.sql.common.utils.StringUtils;
 import org.opensearch.sql.datasource.exceptions.DataSourceNotFoundException;
 import org.opensearch.sql.datasource.model.DataSource;
+import org.opensearch.sql.datasource.model.DataSourceInterfaceType;
 import org.opensearch.sql.datasource.model.DataSourceMetadata;
 import org.opensearch.sql.datasource.model.DataSourceType;
 import org.opensearch.sql.storage.DataSourceFactory;
@@ -134,6 +135,11 @@ public class DataSourceServiceImpl implements DataSourceService {
   public Boolean dataSourceExists(String dataSourceName) {
     return DEFAULT_DATASOURCE_NAME.equals(dataSourceName)
         || this.dataSourceMetadataStorage.getDataSourceMetadata(dataSourceName).isPresent();
+  }
+
+  @Override
+  public DataSourceInterfaceType datasourceInterfaceType() {
+    return DataSourceInterfaceType.API;
   }
 
 
