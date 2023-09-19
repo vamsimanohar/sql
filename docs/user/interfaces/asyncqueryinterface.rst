@@ -106,3 +106,19 @@ Sample Response If the Query is successful ::
         "total": 1,
         "size": 1
     }
+Job Cancellation API
+======================================
+If security plugin is enabled, this API can only be invoked by users with permission ``cluster:admin/opensearch/ql/jobs/delete``.
+
+
+HTTP URI: _plugins/_query/_jobs/{jobId}
+HTTP VERB: DELETE
+
+
+Sample Request BODY::
+
+    curl --location --request DELETE 'http://localhost:9200/_plugins/_query/_jobs/00fdalrvgkbh2g0q' \
+    --header 'Content-Type: application/json' \
+    --data '{
+        "query" : "select * from my_glue.default.http_logs limit 10"
+    }'
