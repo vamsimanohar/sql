@@ -14,6 +14,7 @@ import static org.opensearch.sql.spark.constants.TestConstants.EMRS_EXECUTION_RO
 import static org.opensearch.sql.spark.constants.TestConstants.EMR_JOB_ID;
 import static org.opensearch.sql.spark.constants.TestConstants.QUERY;
 
+import com.amazonaws.services.emrserverless.model.CancelJobRunResult;
 import com.amazonaws.services.emrserverless.model.GetJobRunResult;
 import com.amazonaws.services.emrserverless.model.JobRun;
 import com.amazonaws.services.emrserverless.model.JobRunState;
@@ -81,6 +82,51 @@ public class SparkQueryDispatcherTest {
         illegalArgumentException.getMessage());
   }
 
+  @Test
+  void testGetQueryResponse() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            emrServerlessClient, dataSourceService, jobExecutionResponseReader);
+    when(emrServerlessClient.getJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID))
+        .thenReturn(new GetJobRunResult().withJobRun(new JobRun().withState(JobRunState.PENDING)));
+    JSONObject result = sparkQueryDispatcher.getQueryResponse(EMRS_APPLICATION_ID, EMR_JOB_ID);
+    Assertions.assertEquals("PENDING", result.get("status"));
+    verifyNoInteractions(jobExecutionResponseReader);
+  }
+
+  @Test
+  void testGetQueryResponseWithSuccess() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            emrServerlessClient, dataSourceService, jobExecutionResponseReader);
+    when(emrServerlessClient.getJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID))
+        .thenReturn(new GetJobRunResult().withJobRun(new JobRun().withState(JobRunState.SUCCESS)));
+    JSONObject queryResult = new JSONObject();
+    queryResult.put("data", "result");
+    when(jobExecutionResponseReader.getResultFromOpensearchIndex(EMR_JOB_ID))
+        .thenReturn(queryResult);
+    JSONObject result = sparkQueryDispatcher.getQueryResponse(EMRS_APPLICATION_ID, EMR_JOB_ID);
+    verify(emrServerlessClient, times(1)).getJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID);
+    verify(jobExecutionResponseReader, times(1)).getResultFromOpensearchIndex(EMR_JOB_ID);
+    Assertions.assertEquals(new HashSet<>(Arrays.asList("data", "status")), result.keySet());
+    Assertions.assertEquals("result", result.get("data"));
+    Assertions.assertEquals("SUCCESS", result.get("status"));
+  }
+
+  @Test
+  void testCancelJob() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            emrServerlessClient, dataSourceService, jobExecutionResponseReader);
+    when(emrServerlessClient.closeJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID))
+        .thenReturn(
+            new CancelJobRunResult()
+                .withJobRunId(EMR_JOB_ID)
+                .withApplicationId(EMRS_APPLICATION_ID));
+    String jobId = sparkQueryDispatcher.cancelJob(EMRS_APPLICATION_ID, EMR_JOB_ID);
+    Assertions.assertEquals(EMR_JOB_ID, jobId);
+  }
+
   private DataSourceMetadata constructMyGlueDataSourceMetadata() {
     DataSourceMetadata dataSourceMetadata = new DataSourceMetadata();
     dataSourceMetadata.setName("my_glue");
@@ -113,38 +159,7 @@ public class SparkQueryDispatcherTest {
     return dataSourceMetadata;
   }
 
-  @Test
-  void testGetQueryResponse() {
-    SparkQueryDispatcher sparkQueryDispatcher =
-        new SparkQueryDispatcher(
-            emrServerlessClient, dataSourceService, jobExecutionResponseReader);
-    when(emrServerlessClient.getJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID))
-        .thenReturn(new GetJobRunResult().withJobRun(new JobRun().withState(JobRunState.PENDING)));
-    JSONObject result = sparkQueryDispatcher.getQueryResponse(EMRS_APPLICATION_ID, EMR_JOB_ID);
-    Assertions.assertEquals("PENDING", result.get("status"));
-    verifyNoInteractions(jobExecutionResponseReader);
-  }
-
-  @Test
-  void testGetQueryResponseWithSuccess() {
-    SparkQueryDispatcher sparkQueryDispatcher =
-        new SparkQueryDispatcher(
-            emrServerlessClient, dataSourceService, jobExecutionResponseReader);
-    when(emrServerlessClient.getJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID))
-        .thenReturn(new GetJobRunResult().withJobRun(new JobRun().withState(JobRunState.SUCCESS)));
-    JSONObject queryResult = new JSONObject();
-    queryResult.put("data", "result");
-    when(jobExecutionResponseReader.getResultFromOpensearchIndex(EMR_JOB_ID))
-        .thenReturn(queryResult);
-    JSONObject result = sparkQueryDispatcher.getQueryResponse(EMRS_APPLICATION_ID, EMR_JOB_ID);
-    verify(emrServerlessClient, times(1)).getJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID);
-    verify(jobExecutionResponseReader, times(1)).getResultFromOpensearchIndex(EMR_JOB_ID);
-    Assertions.assertEquals(new HashSet<>(Arrays.asList("data", "status")), result.keySet());
-    Assertions.assertEquals("result", result.get("data"));
-    Assertions.assertEquals("SUCCESS", result.get("status"));
-  }
-
-  String constructExpectedSparkSubmitParameterString() {
+  private String constructExpectedSparkSubmitParameterString() {
     return " --class org.opensearch.sql.FlintJob  --conf"
                + " spark.hadoop.fs.s3.customAWSCredentialsProvider=com.amazonaws.emr.AssumeRoleAWSCredentialsProvider"
                + "  --conf"

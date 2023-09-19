@@ -7,6 +7,7 @@
 
 package org.opensearch.sql.spark.client;
 
+import com.amazonaws.services.emrserverless.model.CancelJobRunResult;
 import com.amazonaws.services.emrserverless.model.GetJobRunResult;
 
 public interface EmrServerlessClient {
@@ -19,4 +20,6 @@ public interface EmrServerlessClient {
       String sparkSubmitParams);
 
   GetJobRunResult getJobRunResult(String applicationId, String jobId);
+
+  CancelJobRunResult closeJobRunResult(String applicationId, String jobId);
 }

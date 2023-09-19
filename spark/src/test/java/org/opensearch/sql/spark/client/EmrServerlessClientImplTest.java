@@ -9,13 +9,16 @@ import static org.mockito.Mockito.when;
 import static org.opensearch.sql.spark.constants.TestConstants.EMRS_APPLICATION_ID;
 import static org.opensearch.sql.spark.constants.TestConstants.EMRS_EXECUTION_ROLE;
 import static org.opensearch.sql.spark.constants.TestConstants.EMRS_JOB_NAME;
+import static org.opensearch.sql.spark.constants.TestConstants.EMR_JOB_ID;
 import static org.opensearch.sql.spark.constants.TestConstants.QUERY;
 import static org.opensearch.sql.spark.constants.TestConstants.SPARK_SUBMIT_PARAMETERS;
 
 import com.amazonaws.services.emrserverless.AWSEMRServerless;
+import com.amazonaws.services.emrserverless.model.CancelJobRunResult;
 import com.amazonaws.services.emrserverless.model.GetJobRunResult;
 import com.amazonaws.services.emrserverless.model.JobRun;
 import com.amazonaws.services.emrserverless.model.StartJobRunResult;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -44,5 +47,15 @@ public class EmrServerlessClientImplTest {
     when(emrServerless.getJobRun(any())).thenReturn(response);
     EmrServerlessClientImpl emrServerlessClient = new EmrServerlessClientImpl(emrServerless);
     emrServerlessClient.getJobRunResult(EMRS_APPLICATION_ID, "123");
+  }
+
+  @Test
+  void testCancelJobRun() {
+    when(emrServerless.cancelJobRun(any()))
+        .thenReturn(new CancelJobRunResult().withJobRunId(EMR_JOB_ID));
+    EmrServerlessClientImpl emrServerlessClient = new EmrServerlessClientImpl(emrServerless);
+    CancelJobRunResult cancelJobRunResult =
+        emrServerlessClient.closeJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID);
+    Assertions.assertEquals(EMR_JOB_ID, cancelJobRunResult.getJobRunId());
   }
 }

@@ -9,6 +9,7 @@ package org.opensearch.sql.spark.transport.model;
 
 import java.io.IOException;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 import org.opensearch.action.ActionRequest;
 import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.core.common.io.stream.StreamInput;
@@ -16,7 +17,7 @@ import org.opensearch.core.common.io.stream.StreamInput;
 @AllArgsConstructor
 public class DeleteJobActionRequest extends ActionRequest {
 
-  private String jobId;
+  @Getter private String jobId;
 
   /** Constructor of SubmitJobActionRequest from StreamInput. */
   public DeleteJobActionRequest(StreamInput in) throws IOException {

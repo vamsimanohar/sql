@@ -93,6 +93,15 @@ public class JobExecutorServiceImpl implements JobExecutorService {
     throw new JobNotFoundException(String.format("JobId: %s not found", jobId));
   }
 
+  @Override
+  public String cancelJob(String jobId) {
+    Optional<JobMetadata> jobMetadata = jobMetadataStorageService.getJobMetadata(jobId);
+    if (jobMetadata.isPresent()) {
+      return sparkQueryDispatcher.cancelJob(jobMetadata.get().getApplicationId(), jobId);
+    }
+    throw new JobNotFoundException(String.format("JobId: %s not found", jobId));
+  }
+
   private void validateSparkExecutionEngineSettings() {
     if (!isJobExecutionEnabled) {
       throw new IllegalArgumentException(

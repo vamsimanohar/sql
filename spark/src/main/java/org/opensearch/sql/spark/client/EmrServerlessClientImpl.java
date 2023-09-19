@@ -9,6 +9,8 @@ import static org.opensearch.sql.spark.data.constants.SparkConstants.SPARK_RESPO
 import static org.opensearch.sql.spark.data.constants.SparkConstants.SPARK_SQL_APPLICATION_JAR;
 
 import com.amazonaws.services.emrserverless.AWSEMRServerless;
+import com.amazonaws.services.emrserverless.model.CancelJobRunRequest;
+import com.amazonaws.services.emrserverless.model.CancelJobRunResult;
 import com.amazonaws.services.emrserverless.model.GetJobRunRequest;
 import com.amazonaws.services.emrserverless.model.GetJobRunResult;
 import com.amazonaws.services.emrserverless.model.JobDriver;
@@ -64,5 +66,17 @@ public class EmrServerlessClientImpl implements EmrServerlessClient {
             (PrivilegedAction<GetJobRunResult>) () -> emrServerless.getJobRun(request));
     logger.info("Job Run state: " + getJobRunResult.getJobRun().getState());
     return getJobRunResult;
+  }
+
+  @Override
+  public CancelJobRunResult closeJobRunResult(String applicationId, String jobId) {
+    CancelJobRunRequest cancelJobRunRequest =
+        new CancelJobRunRequest().withJobRunId(jobId).withApplicationId(applicationId);
+    CancelJobRunResult cancelJobRunResult =
+        AccessController.doPrivileged(
+            (PrivilegedAction<CancelJobRunResult>)
+                () -> emrServerless.cancelJobRun(cancelJobRunRequest));
+    logger.info(String.format("Job : %s cancelled", cancelJobRunResult.getJobRunId()));
+    return cancelJobRunResult;
   }
 }

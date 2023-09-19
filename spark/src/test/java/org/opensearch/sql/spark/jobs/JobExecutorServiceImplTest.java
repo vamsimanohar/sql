@@ -129,4 +129,30 @@ public class JobExecutorServiceImplTest {
             + " JobAPIs",
         illegalArgumentException.getMessage());
   }
+
+  @Test
+  void testCancelJobWithJobNotFound() {
+    JobExecutorServiceImpl jobExecutorService =
+        new JobExecutorServiceImpl(jobMetadataStorageService, sparkQueryDispatcher, settings);
+    when(jobMetadataStorageService.getJobMetadata(EMR_JOB_ID)).thenReturn(Optional.empty());
+    JobNotFoundException jobNotFoundException =
+        Assertions.assertThrows(
+            JobNotFoundException.class, () -> jobExecutorService.cancelJob(EMR_JOB_ID));
+    Assertions.assertEquals(
+        "JobId: " + EMR_JOB_ID + " not found", jobNotFoundException.getMessage());
+    verifyNoInteractions(sparkQueryDispatcher);
+    verifyNoInteractions(settings);
+  }
+
+  @Test
+  void testCancelJob() {
+    JobExecutorServiceImpl jobExecutorService =
+        new JobExecutorServiceImpl(jobMetadataStorageService, sparkQueryDispatcher, settings);
+    when(jobMetadataStorageService.getJobMetadata(EMR_JOB_ID))
+        .thenReturn(Optional.of(new JobMetadata(EMR_JOB_ID, EMRS_APPLICATION_ID)));
+    when(sparkQueryDispatcher.cancelJob(EMRS_APPLICATION_ID, EMR_JOB_ID)).thenReturn(EMR_JOB_ID);
+    String jobId = jobExecutorService.cancelJob(EMR_JOB_ID);
+    Assertions.assertEquals(EMR_JOB_ID, jobId);
+    verifyNoInteractions(settings);
+  }
 }

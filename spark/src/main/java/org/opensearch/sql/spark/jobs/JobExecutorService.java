@@ -27,4 +27,12 @@ public interface JobExecutorService {
    * @return {@link JobExecutionResponse}
    */
   JobExecutionResponse getJobResults(String jobId);
+
+  /**
+   * Cancels running job and returns the cancelled jobId.
+   *
+   * @param jobId jobId.
+   * @return {@link String} cancelledJobId.
+   */
+  String cancelJob(String jobId);
 }

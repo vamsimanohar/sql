@@ -239,7 +239,7 @@ public class RestJobManagementAction extends BaseRestHandler {
                       public void onResponse(DeleteJobActionResponse deleteJobActionResponse) {
                         restChannel.sendResponse(
                             new BytesRestResponse(
-                                RestStatus.OK,
+                                RestStatus.NO_CONTENT,
                                 "application/json; charset=UTF-8",
                                 deleteJobActionResponse.getResult()));
                       }
