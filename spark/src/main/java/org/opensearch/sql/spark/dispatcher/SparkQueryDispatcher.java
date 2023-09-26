@@ -37,10 +37,14 @@ import org.opensearch.sql.spark.dispatcher.model.IndexDetails;
 import org.opensearch.sql.spark.response.JobExecutionResponseReader;
 import org.opensearch.sql.spark.rest.model.LangType;
 import org.opensearch.sql.spark.utils.SQLQueryUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /** This class takes care of understanding query and dispatching job query to emr serverless. */
 @AllArgsConstructor
 public class SparkQueryDispatcher {
+
+  private static final Logger logger = LogManager.getLogger(SparkQueryDispatcher.class);
 
   private SparkJobClient sparkJobClient;
 
@@ -83,6 +87,7 @@ public class SparkQueryDispatcher {
   }
 
   private String getDataSourceRoleARN(DataSourceMetadata dataSourceMetadata) {
+    logger.info("Datasource :" + dataSourceMetadata.getProperties());
     if (DataSourceType.S3GLUE.equals(dataSourceMetadata.getConnector())) {
       return dataSourceMetadata.getProperties().get("glue.auth.role_arn");
     }

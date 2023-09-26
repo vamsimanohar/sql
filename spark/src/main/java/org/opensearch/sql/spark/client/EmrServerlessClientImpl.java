@@ -34,6 +34,12 @@ public class EmrServerlessClientImpl implements SparkJobClient {
 
   @Override
   public String startJobRun(StartJobRequest startJobRequest) {
+    logger.error("StartJobRequest :" + startJobRequest.getExecutionRoleArn());
+    logger.error(startJobRequest.getJobName());
+    logger.error(startJobRequest.getTags());
+    logger.error(startJobRequest.getApplicationId());
+    logger.error(startJobRequest.getQuery());
+    logger.error("Spark Parameters:"+ startJobRequest.getSparkSubmitParams());
     StartJobRunRequest request =
         new StartJobRunRequest()
             .withName(startJobRequest.getJobName())
