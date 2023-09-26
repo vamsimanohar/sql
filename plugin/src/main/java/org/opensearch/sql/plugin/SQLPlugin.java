@@ -301,7 +301,10 @@ public class SQLPlugin extends Plugin implements ActionPlugin, ScriptPlugin {
     JobExecutionResponseReader jobExecutionResponseReader = new JobExecutionResponseReader(client);
     SparkQueryDispatcher sparkQueryDispatcher =
         new SparkQueryDispatcher(
-            sparkJobClient, this.dataSourceService, jobExecutionResponseReader);
+            sparkJobClient,
+            this.dataSourceService,
+            new DataSourceUserAuthorizationHelperImpl(client),
+            jobExecutionResponseReader);
     return new AsyncQueryExecutorServiceImpl(
         asyncQueryJobMetadataStorageService, sparkQueryDispatcher, pluginSettings);
   }

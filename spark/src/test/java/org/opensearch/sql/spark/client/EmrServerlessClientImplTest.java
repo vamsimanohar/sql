@@ -20,6 +20,7 @@ import com.amazonaws.services.emrserverless.model.GetJobRunResult;
 import com.amazonaws.services.emrserverless.model.JobRun;
 import com.amazonaws.services.emrserverless.model.StartJobRunResult;
 import com.amazonaws.services.emrserverless.model.ValidationException;
+import java.util.HashMap;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,7 +38,13 @@ public class EmrServerlessClientImplTest {
 
     EmrServerlessClientImpl emrServerlessClient = new EmrServerlessClientImpl(emrServerless);
     emrServerlessClient.startJobRun(
-        QUERY, EMRS_JOB_NAME, EMRS_APPLICATION_ID, EMRS_EXECUTION_ROLE, SPARK_SUBMIT_PARAMETERS);
+        new StartJobRequest(
+            QUERY,
+            EMRS_JOB_NAME,
+            EMRS_APPLICATION_ID,
+            EMRS_EXECUTION_ROLE,
+            SPARK_SUBMIT_PARAMETERS,
+            new HashMap<>()));
   }
 
   @Test

@@ -12,12 +12,7 @@ import com.amazonaws.services.emrserverless.model.GetJobRunResult;
 
 public interface SparkJobClient {
 
-  String startJobRun(
-      String query,
-      String jobName,
-      String applicationId,
-      String executionRoleArn,
-      String sparkSubmitParams);
+  String startJobRun(StartJobRequest startJobRequest);
 
   GetJobRunResult getJobRunResult(String applicationId, String jobId);
 

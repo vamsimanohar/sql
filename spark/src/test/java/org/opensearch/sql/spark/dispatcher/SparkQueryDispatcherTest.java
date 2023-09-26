@@ -5,6 +5,7 @@
 
 package org.opensearch.sql.spark.dispatcher;
 
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -12,7 +13,6 @@ import static org.mockito.Mockito.when;
 import static org.opensearch.sql.spark.constants.TestConstants.EMRS_APPLICATION_ID;
 import static org.opensearch.sql.spark.constants.TestConstants.EMRS_EXECUTION_ROLE;
 import static org.opensearch.sql.spark.constants.TestConstants.EMR_JOB_ID;
-import static org.opensearch.sql.spark.constants.TestConstants.QUERY;
 
 import com.amazonaws.services.emrserverless.model.CancelJobRunResult;
 import com.amazonaws.services.emrserverless.model.GetJobRunResult;
@@ -31,8 +31,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensearch.sql.datasource.DataSourceService;
 import org.opensearch.sql.datasource.model.DataSourceMetadata;
 import org.opensearch.sql.datasource.model.DataSourceType;
+import org.opensearch.sql.datasources.auth.DataSourceUserAuthorizationHelperImpl;
 import org.opensearch.sql.spark.client.SparkJobClient;
+import org.opensearch.sql.spark.client.StartJobRequest;
+import org.opensearch.sql.spark.dispatcher.model.DispatchQueryRequest;
 import org.opensearch.sql.spark.response.JobExecutionResponseReader;
+import org.opensearch.sql.spark.rest.model.LangType;
 
 @ExtendWith(MockitoExtension.class)
 public class SparkQueryDispatcherTest {
@@ -40,50 +44,246 @@ public class SparkQueryDispatcherTest {
   @Mock private SparkJobClient sparkJobClient;
   @Mock private DataSourceService dataSourceService;
   @Mock private JobExecutionResponseReader jobExecutionResponseReader;
+  @Mock private DataSourceUserAuthorizationHelperImpl dataSourceUserAuthorizationHelper;
 
   @Test
-  void testDispatch() {
+  void testDispatchSelectQuery() {
     SparkQueryDispatcher sparkQueryDispatcher =
-        new SparkQueryDispatcher(sparkJobClient, dataSourceService, jobExecutionResponseReader);
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
+    HashMap<String, String> tags = new HashMap<>();
+    tags.put("datasource", "my_glue");
+    tags.put("table", "http_logs");
+    String query = "select * from my_glue.default.http_logs";
     when(sparkJobClient.startJobRun(
-            QUERY,
-            "flint-opensearch-query",
-            EMRS_APPLICATION_ID,
-            EMRS_EXECUTION_ROLE,
-            constructExpectedSparkSubmitParameterString()))
+            new StartJobRequest(
+                query,
+                "my_glue-default-http_logs",
+                EMRS_APPLICATION_ID,
+                EMRS_EXECUTION_ROLE,
+                constructExpectedSparkSubmitParameterString(),
+                tags)))
         .thenReturn(EMR_JOB_ID);
-    when(dataSourceService.getRawDataSourceMetadata("my_glue"))
-        .thenReturn(constructMyGlueDataSourceMetadata());
-    String jobId = sparkQueryDispatcher.dispatch(EMRS_APPLICATION_ID, QUERY, EMRS_EXECUTION_ROLE);
+    DataSourceMetadata dataSourceMetadata = constructMyGlueDataSourceMetadata();
+    when(dataSourceService.getRawDataSourceMetadata("my_glue")).thenReturn(dataSourceMetadata);
+    doNothing().when(dataSourceUserAuthorizationHelper).authorizeDataSource(dataSourceMetadata);
+    String jobId =
+        sparkQueryDispatcher.dispatch(
+            new DispatchQueryRequest(
+                EMRS_APPLICATION_ID, query, LangType.SQL, EMRS_EXECUTION_ROLE));
     verify(sparkJobClient, times(1))
         .startJobRun(
-            QUERY,
-            "flint-opensearch-query",
-            EMRS_APPLICATION_ID,
-            EMRS_EXECUTION_ROLE,
-            constructExpectedSparkSubmitParameterString());
+            new StartJobRequest(
+                query,
+                "my_glue-default-http_logs",
+                EMRS_APPLICATION_ID,
+                EMRS_EXECUTION_ROLE,
+                constructExpectedSparkSubmitParameterString(),
+                tags));
     Assertions.assertEquals(EMR_JOB_ID, jobId);
+  }
+
+  @Test
+  void testDispatchIndexQuery() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
+    HashMap<String, String> tags = new HashMap<>();
+    tags.put("datasource", "my_glue");
+    tags.put("table", "http_logs");
+    tags.put("index", "elb_and_requestUri");
+    String query =
+        "CREATE INDEX elb_and_requestUri ON my_glue.default.http_logs(l_orderkey, l_quantity) WITH"
+            + " (auto_refresh = true)";
+    when(sparkJobClient.startJobRun(
+            new StartJobRequest(
+                query,
+                "my_glue-default-http_logs-elb_and_requestUri",
+                EMRS_APPLICATION_ID,
+                EMRS_EXECUTION_ROLE,
+                constructExpectedSparkSubmitParameterString(),
+                tags)))
+        .thenReturn(EMR_JOB_ID);
+    DataSourceMetadata dataSourceMetadata = constructMyGlueDataSourceMetadata();
+    when(dataSourceService.getRawDataSourceMetadata("my_glue")).thenReturn(dataSourceMetadata);
+    doNothing().when(dataSourceUserAuthorizationHelper).authorizeDataSource(dataSourceMetadata);
+    String jobId =
+        sparkQueryDispatcher.dispatch(
+            new DispatchQueryRequest(
+                EMRS_APPLICATION_ID, query, LangType.SQL, EMRS_EXECUTION_ROLE));
+    verify(sparkJobClient, times(1))
+        .startJobRun(
+            new StartJobRequest(
+                query,
+                "my_glue-default-http_logs-elb_and_requestUri",
+                EMRS_APPLICATION_ID,
+                EMRS_EXECUTION_ROLE,
+                constructExpectedSparkSubmitParameterString(),
+                tags));
+    Assertions.assertEquals(EMR_JOB_ID, jobId);
+  }
+
+  @Test
+  void testDispatchWithPPLQuery() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
+    String query = "select * from my_glue.default.http_logs";
+    UnsupportedOperationException unsupportedOperationException =
+        Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () ->
+                sparkQueryDispatcher.dispatch(
+                    new DispatchQueryRequest(
+                        EMRS_APPLICATION_ID, query, LangType.PPL, EMRS_EXECUTION_ROLE)));
+    Assertions.assertEquals(
+        "UnSupported Lang type:: PPL", unsupportedOperationException.getMessage());
+    verifyNoInteractions(sparkJobClient);
+    verifyNoInteractions(dataSourceService);
+    verifyNoInteractions(dataSourceUserAuthorizationHelper);
+    verifyNoInteractions(jobExecutionResponseReader);
+  }
+
+  @Test
+  void testDispatchQueryWithoutATableName() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
+    String query = "show tables";
+    UnsupportedOperationException unsupportedOperationException =
+        Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () ->
+                sparkQueryDispatcher.dispatch(
+                    new DispatchQueryRequest(
+                        EMRS_APPLICATION_ID, query, LangType.SQL, EMRS_EXECUTION_ROLE)));
+    Assertions.assertEquals(
+        "Queries without a datasource are not supported",
+        unsupportedOperationException.getMessage());
+    verifyNoInteractions(sparkJobClient);
+    verifyNoInteractions(dataSourceService);
+    verifyNoInteractions(dataSourceUserAuthorizationHelper);
+    verifyNoInteractions(jobExecutionResponseReader);
+  }
+
+  @Test
+  void testDispatchQueryWithoutADataSourceName() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
+    String query = "select * from default.http_logs";
+    UnsupportedOperationException unsupportedOperationException =
+        Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () ->
+                sparkQueryDispatcher.dispatch(
+                    new DispatchQueryRequest(
+                        EMRS_APPLICATION_ID, query, LangType.SQL, EMRS_EXECUTION_ROLE)));
+    Assertions.assertEquals(
+        "Queries without a datasource are not supported",
+        unsupportedOperationException.getMessage());
+    verifyNoInteractions(sparkJobClient);
+    verifyNoInteractions(dataSourceService);
+    verifyNoInteractions(dataSourceUserAuthorizationHelper);
+    verifyNoInteractions(jobExecutionResponseReader);
+  }
+
+  @Test
+  void testDispatchIndexQueryWithoutADatasourceName() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
+    String query =
+        "CREATE INDEX elb_and_requestUri ON default.http_logs(l_orderkey, l_quantity) WITH"
+            + " (auto_refresh = true)";
+    UnsupportedOperationException unsupportedOperationException =
+        Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () ->
+                sparkQueryDispatcher.dispatch(
+                    new DispatchQueryRequest(
+                        EMRS_APPLICATION_ID, query, LangType.SQL, EMRS_EXECUTION_ROLE)));
+    Assertions.assertEquals(
+        "Queries without a datasource are not supported",
+        unsupportedOperationException.getMessage());
+    verifyNoInteractions(sparkJobClient);
+    verifyNoInteractions(dataSourceService);
+    verifyNoInteractions(dataSourceUserAuthorizationHelper);
+    verifyNoInteractions(jobExecutionResponseReader);
   }
 
   @Test
   void testDispatchWithWrongURI() {
     SparkQueryDispatcher sparkQueryDispatcher =
-        new SparkQueryDispatcher(sparkJobClient, dataSourceService, jobExecutionResponseReader);
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
     when(dataSourceService.getRawDataSourceMetadata("my_glue"))
         .thenReturn(constructMyGlueDataSourceMetadataWithBadURISyntax());
+    String query = "select * from my_glue.default.http_logs";
     IllegalArgumentException illegalArgumentException =
         Assertions.assertThrows(
             IllegalArgumentException.class,
-            () -> sparkQueryDispatcher.dispatch(EMRS_APPLICATION_ID, QUERY, EMRS_EXECUTION_ROLE));
+            () ->
+                sparkQueryDispatcher.dispatch(
+                    new DispatchQueryRequest(
+                        EMRS_APPLICATION_ID, query, LangType.SQL, EMRS_EXECUTION_ROLE)));
     Assertions.assertEquals(
         "Bad URI in indexstore configuration of the : my_glue datasoure.",
         illegalArgumentException.getMessage());
   }
 
   @Test
+  void testDispatchWithUnSupportedDataSourceType() {
+    SparkQueryDispatcher sparkQueryDispatcher =
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
+    when(dataSourceService.getRawDataSourceMetadata("my_prometheus"))
+        .thenReturn(constructPrometheusDataSourceType());
+    String query = "select * from my_prometheus.default.http_logs";
+    UnsupportedOperationException unsupportedOperationException =
+        Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () ->
+                sparkQueryDispatcher.dispatch(
+                    new DispatchQueryRequest(
+                        EMRS_APPLICATION_ID, query, LangType.SQL, EMRS_EXECUTION_ROLE)));
+    Assertions.assertEquals(
+        "UnSupported datasource type for async queries:: PROMETHEUS",
+        unsupportedOperationException.getMessage());
+  }
+
+  @Test
   void testCancelJob() {
     SparkQueryDispatcher sparkQueryDispatcher =
-        new SparkQueryDispatcher(sparkJobClient, dataSourceService, jobExecutionResponseReader);
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
     when(sparkJobClient.cancelJobRun(EMRS_APPLICATION_ID, EMR_JOB_ID))
         .thenReturn(
             new CancelJobRunResult()
@@ -96,7 +296,11 @@ public class SparkQueryDispatcherTest {
   @Test
   void testGetQueryResponse() {
     SparkQueryDispatcher sparkQueryDispatcher =
-        new SparkQueryDispatcher(sparkJobClient, dataSourceService, jobExecutionResponseReader);
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
     when(sparkJobClient.getJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID))
         .thenReturn(new GetJobRunResult().withJobRun(new JobRun().withState(JobRunState.PENDING)));
     JSONObject result = sparkQueryDispatcher.getQueryResponse(EMRS_APPLICATION_ID, EMR_JOB_ID);
@@ -107,7 +311,11 @@ public class SparkQueryDispatcherTest {
   @Test
   void testGetQueryResponseWithSuccess() {
     SparkQueryDispatcher sparkQueryDispatcher =
-        new SparkQueryDispatcher(sparkJobClient, dataSourceService, jobExecutionResponseReader);
+        new SparkQueryDispatcher(
+            sparkJobClient,
+            dataSourceService,
+            dataSourceUserAuthorizationHelper,
+            jobExecutionResponseReader);
     when(sparkJobClient.getJobRunResult(EMRS_APPLICATION_ID, EMR_JOB_ID))
         .thenReturn(new GetJobRunResult().withJobRun(new JobRun().withState(JobRunState.SUCCESS)));
     JSONObject queryResult = new JSONObject();
@@ -182,6 +390,15 @@ public class SparkQueryDispatcherTest {
     properties.put("glue.indexstore.opensearch.uri", "http://localhost:9090? param");
     properties.put("glue.indexstore.opensearch.auth", "sigv4");
     properties.put("glue.indexstore.opensearch.region", "eu-west-1");
+    dataSourceMetadata.setProperties(properties);
+    return dataSourceMetadata;
+  }
+
+  private DataSourceMetadata constructPrometheusDataSourceType() {
+    DataSourceMetadata dataSourceMetadata = new DataSourceMetadata();
+    dataSourceMetadata.setName("my_prometheus");
+    dataSourceMetadata.setConnector(DataSourceType.PROMETHEUS);
+    Map<String, String> properties = new HashMap<>();
     dataSourceMetadata.setProperties(properties);
     return dataSourceMetadata;
   }

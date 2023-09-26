@@ -20,13 +20,23 @@ import com.amazonaws.services.emrserverless.model.GetJobRunResult;
 import com.amazonaws.services.emrserverless.model.JobRunState;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.HashMap;
+import java.util.Map;
 import lombok.AllArgsConstructor;
 import org.json.JSONObject;
 import org.opensearch.sql.datasource.DataSourceService;
 import org.opensearch.sql.datasource.model.DataSourceMetadata;
+import org.opensearch.sql.datasource.model.DataSourceType;
+import org.opensearch.sql.datasources.auth.DataSourceUserAuthorizationHelperImpl;
 import org.opensearch.sql.spark.asyncquery.model.S3GlueSparkSubmitParameters;
 import org.opensearch.sql.spark.client.SparkJobClient;
+import org.opensearch.sql.spark.client.StartJobRequest;
+import org.opensearch.sql.spark.dispatcher.model.DispatchQueryRequest;
+import org.opensearch.sql.spark.dispatcher.model.FullyQualifiedTableName;
+import org.opensearch.sql.spark.dispatcher.model.IndexDetails;
 import org.opensearch.sql.spark.response.JobExecutionResponseReader;
+import org.opensearch.sql.spark.rest.model.LangType;
+import org.opensearch.sql.spark.utils.SQLQueryUtils;
 
 /** This class takes care of understanding query and dispatching job query to emr serverless. */
 @AllArgsConstructor
@@ -36,22 +46,12 @@ public class SparkQueryDispatcher {
 
   private DataSourceService dataSourceService;
 
+  private DataSourceUserAuthorizationHelperImpl dataSourceUserAuthorizationHelper;
+
   private JobExecutionResponseReader jobExecutionResponseReader;
 
-  public String dispatch(String applicationId, String query, String executionRoleARN) {
-    String datasourceName = getDataSourceName();
-    try {
-      return sparkJobClient.startJobRun(
-          query,
-          "flint-opensearch-query",
-          applicationId,
-          executionRoleARN,
-          constructSparkParameters(datasourceName));
-    } catch (URISyntaxException e) {
-      throw new IllegalArgumentException(
-          String.format(
-              "Bad URI in indexstore configuration of the : %s datasoure.", datasourceName));
-    }
+  public String dispatch(DispatchQueryRequest dispatchQueryRequest) {
+    return sparkJobClient.startJobRun(getStartJobRequest(dispatchQueryRequest));
   }
 
   // TODO : Fetch from Result Index and then make call to EMR Serverless.
@@ -70,19 +70,29 @@ public class SparkQueryDispatcher {
     return cancelJobRunResult.getJobRunId();
   }
 
-  // TODO: Analyze given query
-  // Extract datasourceName
-  // Apply Authorizaiton.
-  private String getDataSourceName() {
-    return "my_glue";
+  private StartJobRequest getStartJobRequest(DispatchQueryRequest dispatchQueryRequest) {
+    if (LangType.SQL.equals(dispatchQueryRequest.getLangType())) {
+      if (SQLQueryUtils.isIndexQuery(dispatchQueryRequest.getQuery()))
+        return getStartJobRequestForIndexRequest(dispatchQueryRequest);
+      else {
+        return getStartJobRequestForNonIndexQueries(dispatchQueryRequest);
+      }
+    }
+    throw new UnsupportedOperationException(
+        String.format("UnSupported Lang type:: %s", dispatchQueryRequest.getLangType()));
   }
 
-  // TODO: Analyze given query and get the role arn based on datasource type.
   private String getDataSourceRoleARN(DataSourceMetadata dataSourceMetadata) {
-    return dataSourceMetadata.getProperties().get("glue.auth.role_arn");
+    if (DataSourceType.S3GLUE.equals(dataSourceMetadata.getConnector())) {
+      return dataSourceMetadata.getProperties().get("glue.auth.role_arn");
+    }
+    throw new UnsupportedOperationException(
+        String.format(
+            "UnSupported datasource type for async queries:: %s",
+            dataSourceMetadata.getConnector()));
   }
 
-  private String constructSparkParameters(String datasourceName) throws URISyntaxException {
+  private String constructSparkParameters(String datasourceName) {
     DataSourceMetadata dataSourceMetadata =
         dataSourceService.getRawDataSourceMetadata(datasourceName);
     S3GlueSparkSubmitParameters s3GlueSparkSubmitParameters = new S3GlueSparkSubmitParameters();
@@ -93,7 +103,14 @@ public class SparkQueryDispatcher {
     s3GlueSparkSubmitParameters.addParameter(
         HIVE_METASTORE_GLUE_ARN_KEY, getDataSourceRoleARN(dataSourceMetadata));
     String opensearchuri = dataSourceMetadata.getProperties().get("glue.indexstore.opensearch.uri");
-    URI uri = new URI(opensearchuri);
+    URI uri;
+    try {
+      uri = new URI(opensearchuri);
+    } catch (URISyntaxException e) {
+      throw new IllegalArgumentException(
+          String.format(
+              "Bad URI in indexstore configuration of the : %s datasoure.", datasourceName));
+    }
     String auth = dataSourceMetadata.getProperties().get("glue.indexstore.opensearch.auth");
     String region = dataSourceMetadata.getProperties().get("glue.indexstore.opensearch.region");
     s3GlueSparkSubmitParameters.addParameter(FLINT_INDEX_STORE_HOST_KEY, uri.getHost());
@@ -105,5 +122,70 @@ public class SparkQueryDispatcher {
     s3GlueSparkSubmitParameters.addParameter(
         "spark.sql.catalog." + datasourceName, FLINT_DELEGATE_CATALOG);
     return s3GlueSparkSubmitParameters.toString();
+  }
+
+  private StartJobRequest getStartJobRequestForNonIndexQueries(
+      DispatchQueryRequest dispatchQueryRequest) {
+    StartJobRequest startJobRequest;
+    FullyQualifiedTableName fullyQualifiedTableName =
+        SQLQueryUtils.extractFullyQualifiedTableName(dispatchQueryRequest.getQuery());
+    if (fullyQualifiedTableName == null || fullyQualifiedTableName.getDatasourceName() == null) {
+      throw new UnsupportedOperationException("Queries without a datasource are not supported");
+    }
+    Map<String, String> tags = new HashMap<>();
+    dataSourceUserAuthorizationHelper.authorizeDataSource(
+        this.dataSourceService.getRawDataSourceMetadata(
+            fullyQualifiedTableName.getDatasourceName()));
+    String jobName =
+        fullyQualifiedTableName.getDatasourceName()
+            + "-"
+            + fullyQualifiedTableName.getSchemaName()
+            + "-"
+            + fullyQualifiedTableName.getTableName();
+    tags.put("datasource", fullyQualifiedTableName.getDatasourceName());
+    tags.put("table", fullyQualifiedTableName.getTableName());
+    startJobRequest =
+        new StartJobRequest(
+            dispatchQueryRequest.getQuery(),
+            jobName,
+            dispatchQueryRequest.getApplicationId(),
+            dispatchQueryRequest.getExecutionRoleARN(),
+            constructSparkParameters(fullyQualifiedTableName.getDatasourceName()),
+            tags);
+    return startJobRequest;
+  }
+
+  private StartJobRequest getStartJobRequestForIndexRequest(
+      DispatchQueryRequest dispatchQueryRequest) {
+    StartJobRequest startJobRequest;
+    IndexDetails indexDetails = SQLQueryUtils.extractIndexDetails(dispatchQueryRequest.getQuery());
+    FullyQualifiedTableName fullyQualifiedTableName = indexDetails.getFullyQualifiedTableName();
+    if (fullyQualifiedTableName.getDatasourceName() == null) {
+      throw new UnsupportedOperationException("Queries without a datasource are not supported");
+    }
+    dataSourceUserAuthorizationHelper.authorizeDataSource(
+        this.dataSourceService.getRawDataSourceMetadata(
+            fullyQualifiedTableName.getDatasourceName()));
+    String jobName =
+        fullyQualifiedTableName.getDatasourceName()
+            + "-"
+            + fullyQualifiedTableName.getSchemaName()
+            + "-"
+            + fullyQualifiedTableName.getTableName()
+            + "-"
+            + indexDetails.getIndexName();
+    Map<String, String> tags = new HashMap<>();
+    tags.put("index", indexDetails.getIndexName());
+    tags.put("datasource", fullyQualifiedTableName.getDatasourceName());
+    tags.put("table", fullyQualifiedTableName.getTableName());
+    startJobRequest =
+        new StartJobRequest(
+            dispatchQueryRequest.getQuery(),
+            jobName,
+            dispatchQueryRequest.getApplicationId(),
+            dispatchQueryRequest.getExecutionRoleARN(),
+            constructSparkParameters(fullyQualifiedTableName.getDatasourceName()),
+            tags);
+    return startJobRequest;
   }
 }

@@ -33,24 +33,21 @@ public class EmrServerlessClientImpl implements SparkJobClient {
   }
 
   @Override
-  public String startJobRun(
-      String query,
-      String jobName,
-      String applicationId,
-      String executionRoleArn,
-      String sparkSubmitParams) {
+  public String startJobRun(StartJobRequest startJobRequest) {
     StartJobRunRequest request =
         new StartJobRunRequest()
-            .withName(jobName)
-            .withApplicationId(applicationId)
-            .withExecutionRoleArn(executionRoleArn)
+            .withName(startJobRequest.getJobName())
+            .withApplicationId(startJobRequest.getApplicationId())
+            .withExecutionRoleArn(startJobRequest.getExecutionRoleArn())
+            .withTags(startJobRequest.getTags())
             .withJobDriver(
                 new JobDriver()
                     .withSparkSubmit(
                         new SparkSubmit()
                             .withEntryPoint(SPARK_SQL_APPLICATION_JAR)
-                            .withEntryPointArguments(query, SPARK_RESPONSE_BUFFER_INDEX_NAME)
-                            .withSparkSubmitParameters(sparkSubmitParams)));
+                            .withEntryPointArguments(
+                                startJobRequest.getQuery(), SPARK_RESPONSE_BUFFER_INDEX_NAME)
+                            .withSparkSubmitParameters(startJobRequest.getSparkSubmitParams())));
     StartJobRunResult startJobRunResult =
         AccessController.doPrivileged(
             (PrivilegedAction<StartJobRunResult>) () -> emrServerless.startJobRun(request));

@@ -44,7 +44,7 @@ Sample Request::
     curl --location 'http://localhost:9200/_plugins/_async_query' \
     --header 'Content-Type: application/json' \
     --data '{
-        "kind" : "sql",
+        "lang" : "sql",
         "query" : "select * from my_glue.default.http_logs limit 10"
     }'
 

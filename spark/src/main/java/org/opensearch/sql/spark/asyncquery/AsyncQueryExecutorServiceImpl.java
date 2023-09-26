@@ -22,6 +22,7 @@ import org.opensearch.sql.spark.asyncquery.model.AsyncQueryExecutionResponse;
 import org.opensearch.sql.spark.asyncquery.model.AsyncQueryJobMetadata;
 import org.opensearch.sql.spark.config.SparkExecutionEngineConfig;
 import org.opensearch.sql.spark.dispatcher.SparkQueryDispatcher;
+import org.opensearch.sql.spark.dispatcher.model.DispatchQueryRequest;
 import org.opensearch.sql.spark.functions.response.DefaultSparkSqlFunctionResponseHandle;
 import org.opensearch.sql.spark.rest.model.CreateAsyncQueryRequest;
 import org.opensearch.sql.spark.rest.model.CreateAsyncQueryResponse;
@@ -62,9 +63,11 @@ public class AsyncQueryExecutorServiceImpl implements AsyncQueryExecutorService 
                         sparkExecutionEngineConfigString));
     String jobId =
         sparkQueryDispatcher.dispatch(
-            sparkExecutionEngineConfig.getApplicationId(),
-            createAsyncQueryRequest.getQuery(),
-            sparkExecutionEngineConfig.getExecutionRoleARN());
+            new DispatchQueryRequest(
+                sparkExecutionEngineConfig.getApplicationId(),
+                createAsyncQueryRequest.getQuery(),
+                createAsyncQueryRequest.getLang(),
+                sparkExecutionEngineConfig.getExecutionRoleARN()));
     asyncQueryJobMetadataStorageService.storeJobMetadata(
         new AsyncQueryJobMetadata(jobId, sparkExecutionEngineConfig.getApplicationId()));
     return new CreateAsyncQueryResponse(jobId);
