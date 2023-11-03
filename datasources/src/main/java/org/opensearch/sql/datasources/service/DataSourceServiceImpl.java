@@ -81,6 +81,7 @@ public class DataSourceServiceImpl implements DataSourceService {
     if (!metadata.getName().equals(DEFAULT_DATASOURCE_NAME)) {
       this.dataSourceLoaderCache.getOrLoadDataSource(metadata);
       this.dataSourceMetadataStorage.createDataSourceMetadata(metadata);
+      this.dataSourceMetadataStorage.createDataSourceResultIndex(metadata);
     }
   }
 
@@ -90,6 +91,8 @@ public class DataSourceServiceImpl implements DataSourceService {
     if (!dataSourceMetadata.getName().equals(DEFAULT_DATASOURCE_NAME)) {
       this.dataSourceLoaderCache.getOrLoadDataSource(dataSourceMetadata);
       this.dataSourceMetadataStorage.updateDataSourceMetadata(dataSourceMetadata);
+      // If resultIndex is changed in update call
+      this.dataSourceMetadataStorage.createDataSourceResultIndex(dataSourceMetadata);
     } else {
       throw new UnsupportedOperationException(
           "Not allowed to update default datasource :" + DEFAULT_DATASOURCE_NAME);

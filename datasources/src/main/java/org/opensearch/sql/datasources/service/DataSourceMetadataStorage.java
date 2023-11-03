@@ -53,4 +53,13 @@ public interface DataSourceMetadataStorage {
    * @param datasourceName name of the {@link DataSource}.
    */
   void deleteDataSourceMetadata(String datasourceName);
+
+  /**
+   * Creates query result index for the given datasource. We have introduced this method to handle
+   * the issue: https://github.com/opensearch-project/sql/issues/2268 Once a long term solution is
+   * finalized, we can make a decision to remove or have it.
+   *
+   * @param dataSourceMetadata {@link DataSourceMetadata}.
+   */
+  void createDataSourceResultIndex(DataSourceMetadata dataSourceMetadata);
 }

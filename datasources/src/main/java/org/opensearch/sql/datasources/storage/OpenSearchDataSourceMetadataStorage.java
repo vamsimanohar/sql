@@ -56,6 +56,11 @@ public class OpenSearchDataSourceMetadataStorage implements DataSourceMetadataSt
   private static final Integer DATASOURCE_QUERY_RESULT_SIZE = 10000;
   private static final String DATASOURCE_INDEX_SETTINGS_FILE_NAME =
       "datasources-index-settings.yml";
+  private static final String DATASOURCE_QUERY_RESULT_INDEX_MAPPING_FILE_NAME =
+      "query_execution_result_mapping.yml";
+  private static final String DATASOURCE_QUERY_RESULT_INDEX_SETTING_FILE_NAME =
+      "query_execution_result_settings.yml";
+
   private static final Logger LOG = LogManager.getLogger();
   private final Client client;
   private final ClusterService clusterService;
@@ -180,6 +185,44 @@ public class OpenSearchDataSourceMetadataStorage implements DataSourceMetadataSt
       throw new RuntimeException(
           "Deleting dataSource metadata information failed with result : "
               + deleteResponse.getResult().getLowercase());
+    }
+  }
+
+  @Override
+  public void createDataSourceResultIndex(DataSourceMetadata dataSourceMetadata) {
+    if (!this.clusterService.state().routingTable().hasIndex(dataSourceMetadata.getResultIndex())) {
+      try {
+        InputStream mappingFileStream =
+            OpenSearchDataSourceMetadataStorage.class
+                .getClassLoader()
+                .getResourceAsStream(DATASOURCE_QUERY_RESULT_INDEX_MAPPING_FILE_NAME);
+        InputStream settingsFileStream =
+            OpenSearchDataSourceMetadataStorage.class
+                .getClassLoader()
+                .getResourceAsStream(DATASOURCE_QUERY_RESULT_INDEX_SETTING_FILE_NAME);
+        CreateIndexRequest createIndexRequest =
+            new CreateIndexRequest(dataSourceMetadata.getResultIndex());
+        createIndexRequest
+            .mapping(IOUtils.toString(mappingFileStream, StandardCharsets.UTF_8), XContentType.YAML)
+            .settings(
+                IOUtils.toString(settingsFileStream, StandardCharsets.UTF_8), XContentType.YAML);
+        ActionFuture<CreateIndexResponse> createIndexResponseActionFuture;
+        try (ThreadContext.StoredContext ignored =
+            client.threadPool().getThreadContext().stashContext()) {
+          createIndexResponseActionFuture = client.admin().indices().create(createIndexRequest);
+        }
+        CreateIndexResponse createIndexResponse = createIndexResponseActionFuture.actionGet();
+        if (createIndexResponse.isAcknowledged()) {
+          LOG.info(
+              "Index: {} creation Acknowledged", dataSourceMetadata.fromNameToCustomResultIndex());
+        } else {
+          throw new RuntimeException("Index creation is not acknowledged.");
+        }
+      } catch (Throwable e) {
+        LOG.error("Datasource Query Result Index Creation failed due to :{}", e.getMessage());
+        // Suppressing all exceptions as this is not an important step in datasource creation
+        // workflow.
+      }
     }
   }
 

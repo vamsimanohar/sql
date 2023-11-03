@@ -598,6 +598,56 @@ public class OpenSearchDataSourceMetadataStorageTest {
     Mockito.verify(client.threadPool().getThreadContext(), Mockito.times(1)).stashContext();
   }
 
+  @Test
+  public void testCreateDataSourceResultIndexWithOutCreatingIndex() {
+    DataSourceMetadata dataSourceMetadata = getDataSourceMetadata();
+    Mockito.when(
+            clusterService.state().routingTable().hasIndex(dataSourceMetadata.getResultIndex()))
+        .thenReturn(Boolean.TRUE);
+    this.openSearchDataSourceMetadataStorage.createDataSourceResultIndex(dataSourceMetadata);
+
+    Mockito.verify(client.admin().indices(), Mockito.times(0)).create(ArgumentMatchers.any());
+    Mockito.verify(client, Mockito.times(0)).index(ArgumentMatchers.any());
+    Mockito.verify(client.threadPool().getThreadContext(), Mockito.times(0)).stashContext();
+  }
+
+  @Test
+  public void testCreateDataSourceResultIndexWhenIndexIsNotAvailable() {
+    DataSourceMetadata dataSourceMetadata = getDataSourceMetadata();
+    Mockito.when(
+            clusterService.state().routingTable().hasIndex(dataSourceMetadata.getResultIndex()))
+        .thenReturn(Boolean.FALSE);
+    Mockito.when(client.admin().indices().create(ArgumentMatchers.any()))
+        .thenReturn(createIndexResponseActionFuture);
+    Mockito.when(createIndexResponseActionFuture.actionGet())
+        .thenReturn(new CreateIndexResponse(true, true, dataSourceMetadata.getResultIndex()));
+
+    this.openSearchDataSourceMetadataStorage.createDataSourceResultIndex(dataSourceMetadata);
+
+    Mockito.verify(client.admin().indices(), Mockito.times(1)).create(ArgumentMatchers.any());
+    Mockito.verify(client, Mockito.times(0)).index(ArgumentMatchers.any());
+    Mockito.verify(client.threadPool().getThreadContext(), Mockito.times(1)).stashContext();
+  }
+
+  @Test
+  public void testCreateDataSourceResultIndexWithException() {
+
+    DataSourceMetadata dataSourceMetadata = getDataSourceMetadata();
+    Mockito.when(
+            clusterService.state().routingTable().hasIndex(dataSourceMetadata.getResultIndex()))
+        .thenReturn(Boolean.FALSE);
+    Mockito.when(client.admin().indices().create(ArgumentMatchers.any()))
+        .thenReturn(createIndexResponseActionFuture);
+    Mockito.when(createIndexResponseActionFuture.actionGet())
+        .thenReturn(new CreateIndexResponse(false, false, dataSourceMetadata.getResultIndex()));
+
+    this.openSearchDataSourceMetadataStorage.createDataSourceResultIndex(dataSourceMetadata);
+
+    Mockito.verify(client.admin().indices(), Mockito.times(1)).create(ArgumentMatchers.any());
+    Mockito.verify(client, Mockito.times(0)).index(ArgumentMatchers.any());
+    Mockito.verify(client.threadPool().getThreadContext(), Mockito.times(1)).stashContext();
+  }
+
   private String getBasicDataSourceMetadataString() throws JsonProcessingException {
     DataSourceMetadata dataSourceMetadata = new DataSourceMetadata();
     dataSourceMetadata.setName("testDS");

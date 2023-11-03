@@ -145,8 +145,6 @@ public class AsyncQueryExecutorServiceSpec extends OpenSearchIntegTestCase {
             null);
     dataSourceService.createDataSource(otherDm);
     stateStore = new StateStore(client, clusterService);
-    createIndexWithMappings(dm.getResultIndex(), loadResultIndexMappings());
-    createIndexWithMappings(otherDm.getResultIndex(), loadResultIndexMappings());
   }
 
   @After

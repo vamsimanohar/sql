@@ -1,0 +1,37 @@
+---
+##
+# Copyright OpenSearch Contributors
+# SPDX-License-Identifier: Apache-2.0
+##
+
+# Schema file for the query_execution_request index
+# Also "dynamic" is set to "false" so that other fields can be added.,
+dynamic: false
+properties:
+  result:
+    type: object
+    enabled: false
+  schema:
+    type: object
+    enabled: false
+  jobRunId:
+    type: keyword
+  applicationId:
+    type: keyword
+  dataSourceName:
+    type: keyword
+  status:
+    type: keyword
+  queryId:
+    type: keyword
+  queryText:
+    type: text
+  sessionId:
+    type: keyword
+  updateTime:
+    type: date
+    format: strict_date_time||epoch_millis
+  error:
+    type: text
+  queryRunTime:
+    type: long

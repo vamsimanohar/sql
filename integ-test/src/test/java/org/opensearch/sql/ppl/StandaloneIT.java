@@ -264,6 +264,9 @@ public class StandaloneIT extends PPLIntegTestCase {
 
       @Override
       public void deleteDataSourceMetadata(String datasourceName) {}
+
+      @Override
+      public void createDataSourceResultIndex(DataSourceMetadata dataSourceMetadata) {}
     };
   }
 
