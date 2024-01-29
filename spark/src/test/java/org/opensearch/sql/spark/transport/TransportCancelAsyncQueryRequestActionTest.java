@@ -22,7 +22,10 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensearch.action.support.ActionFilters;
+import org.opensearch.client.node.NodeClient;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.sql.datasources.service.DataSourceServiceImpl;
 import org.opensearch.sql.spark.asyncquery.AsyncQueryExecutorServiceImpl;
 import org.opensearch.sql.spark.transport.model.CancelAsyncQueryActionRequest;
 import org.opensearch.sql.spark.transport.model.CancelAsyncQueryActionResponse;
@@ -43,12 +46,19 @@ public class TransportCancelAsyncQueryRequestActionTest {
   private ArgumentCaptor<CancelAsyncQueryActionResponse> deleteJobActionResponseArgumentCaptor;
 
   @Captor private ArgumentCaptor<Exception> exceptionArgumentCaptor;
+  @Mock private NodeClient client;
+  @Mock private ClusterService clusterService;
+  @Mock private DataSourceServiceImpl dataSourceService;
 
   @BeforeEach
   public void setUp() {
     action =
         new TransportCancelAsyncQueryRequestAction(
-            transportService, new ActionFilters(new HashSet<>()), asyncQueryExecutorService);
+            transportService,
+            new ActionFilters(new HashSet<>()),
+            client,
+            clusterService,
+            dataSourceService);
   }
 
   @Test

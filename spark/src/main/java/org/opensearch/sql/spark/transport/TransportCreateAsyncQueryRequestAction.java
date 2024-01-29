@@ -7,16 +7,26 @@
 
 package org.opensearch.sql.spark.transport;
 
+import java.util.ArrayList;
+import java.util.List;
 import org.opensearch.action.ActionType;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
+import org.opensearch.client.node.NodeClient;
+import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.common.inject.Guice;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.common.inject.Injector;
+import org.opensearch.common.inject.Module;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.sql.datasource.DataSourceService;
+import org.opensearch.sql.datasources.service.DataSourceServiceImpl;
+import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.protocol.response.format.JsonResponseFormatter;
 import org.opensearch.sql.spark.asyncquery.AsyncQueryExecutorService;
-import org.opensearch.sql.spark.asyncquery.AsyncQueryExecutorServiceImpl;
 import org.opensearch.sql.spark.rest.model.CreateAsyncQueryRequest;
 import org.opensearch.sql.spark.rest.model.CreateAsyncQueryResponse;
+import org.opensearch.sql.spark.transport.config.AsyncExecutorServiceModule;
 import org.opensearch.sql.spark.transport.model.CreateAsyncQueryActionRequest;
 import org.opensearch.sql.spark.transport.model.CreateAsyncQueryActionResponse;
 import org.opensearch.tasks.Task;
@@ -24,8 +34,7 @@ import org.opensearch.transport.TransportService;
 
 public class TransportCreateAsyncQueryRequestAction
     extends HandledTransportAction<CreateAsyncQueryActionRequest, CreateAsyncQueryActionResponse> {
-
-  private final AsyncQueryExecutorService asyncQueryExecutorService;
+  private final Injector injector;
 
   public static final String NAME = "cluster:admin/opensearch/ql/async_query/create";
   public static final ActionType<CreateAsyncQueryActionResponse> ACTION_TYPE =
@@ -35,9 +44,21 @@ public class TransportCreateAsyncQueryRequestAction
   public TransportCreateAsyncQueryRequestAction(
       TransportService transportService,
       ActionFilters actionFilters,
-      AsyncQueryExecutorServiceImpl jobManagementService) {
+      NodeClient client,
+      ClusterService clusterService,
+      DataSourceServiceImpl dataSourceService) {
     super(NAME, transportService, actionFilters, CreateAsyncQueryActionRequest::new);
-    this.asyncQueryExecutorService = jobManagementService;
+    List<Module> moduleList = new ArrayList<>();
+    moduleList.add(new AsyncExecutorServiceModule());
+    moduleList.add(
+        b -> {
+          b.bind(NodeClient.class).toInstance(client);
+          b.bind(org.opensearch.sql.common.setting.Settings.class)
+              .toInstance(new OpenSearchSettings(clusterService.getClusterSettings()));
+          b.bind(DataSourceService.class).toInstance(dataSourceService);
+          b.bind(ClusterService.class).toInstance(clusterService);
+        });
+    this.injector = Guice.createInjector(moduleList);
   }
 
   @Override
@@ -47,6 +68,8 @@ public class TransportCreateAsyncQueryRequestAction
       ActionListener<CreateAsyncQueryActionResponse> listener) {
     try {
       CreateAsyncQueryRequest createAsyncQueryRequest = request.getCreateAsyncQueryRequest();
+      AsyncQueryExecutorService asyncQueryExecutorService =
+          injector.getInstance(AsyncQueryExecutorService.class);
       CreateAsyncQueryResponse createAsyncQueryResponse =
           asyncQueryExecutorService.createAsyncQuery(createAsyncQueryRequest);
       String responseContent =

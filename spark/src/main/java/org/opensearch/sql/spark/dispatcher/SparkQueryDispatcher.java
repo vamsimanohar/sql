@@ -18,6 +18,7 @@ import org.opensearch.sql.datasources.auth.DataSourceUserAuthorizationHelperImpl
 import org.opensearch.sql.spark.asyncquery.model.AsyncQueryId;
 import org.opensearch.sql.spark.asyncquery.model.AsyncQueryJobMetadata;
 import org.opensearch.sql.spark.client.EMRServerlessClient;
+import org.opensearch.sql.spark.config.SparkExecutionEngineConfig;
 import org.opensearch.sql.spark.dispatcher.model.DispatchQueryContext;
 import org.opensearch.sql.spark.dispatcher.model.DispatchQueryRequest;
 import org.opensearch.sql.spark.dispatcher.model.DispatchQueryResponse;
@@ -59,6 +60,19 @@ public class SparkQueryDispatcher {
 
   private StateStore stateStore;
 
+  private SparkQueryDispatcher(SparkQueryDispatcherBuilder builder) {
+    this.emrServerlessClient = builder.emrServerlessClient;
+    this.dataSourceService = builder.dataSourceService;
+    this.dataSourceUserAuthorizationHelper = builder.dataSourceUserAuthorizationHelper;
+    this.jobExecutionResponseReader = builder.jobExecutionResponseReader;
+    this.flintIndexMetadataReader = builder.flintIndexMetadataReader;
+    this.client = builder.client;
+    this.sessionManager = builder.sessionManager;
+    this.leaseManager = builder.leaseManager;
+    this.stateStore = builder.stateStore;
+  }
+
+
   public DispatchQueryResponse dispatch(DispatchQueryRequest dispatchQueryRequest) {
     DataSourceMetadata dataSourceMetadata =
         this.dataSourceService.getRawDataSourceMetadata(dispatchQueryRequest.getDatasource());
@@ -96,6 +110,10 @@ public class SparkQueryDispatcher {
       }
     }
     return asyncQueryHandler.submit(dispatchQueryRequest, contextBuilder.build());
+  }
+
+  private void createEmrServerlessClient(SparkExecutionEngineConfig sparkExecutionEngineConfig) {
+
   }
 
   public JSONObject getQueryResponse(AsyncQueryJobMetadata asyncQueryJobMetadata) {
@@ -156,4 +174,75 @@ public class SparkQueryDispatcher {
     tags.put(DATASOURCE_TAG_KEY, dispatchQueryRequest.getDatasource());
     return tags;
   }
+
+
+  class SparkQueryDispatcherBuilder {
+
+    private EMRServerlessClient emrServerlessClient;  // Optional
+    private DataSourceService dataSourceService;
+    private DataSourceUserAuthorizationHelperImpl dataSourceUserAuthorizationHelper;
+    private JobExecutionResponseReader jobExecutionResponseReader;
+    private FlintIndexMetadataReader flintIndexMetadataReader;
+    private Client client;
+    private SessionManager sessionManager;
+    private LeaseManager leaseManager;
+    private StateStore stateStore;
+
+    public SparkQueryDispatcherBuilder() {
+    }
+
+    public SparkQueryDispatcherBuilder setEMRServerlessClient(
+        EMRServerlessClient emrServerlessClient) {
+      this.emrServerlessClient = emrServerlessClient;
+      return this;
+    }
+
+    public SparkQueryDispatcherBuilder setDataSourceService(DataSourceService dataSourceService) {
+      this.dataSourceService = dataSourceService;
+      return this;
+    }
+
+    public SparkQueryDispatcherBuilder setDataSourceUserAuthorizationHelper(
+        DataSourceUserAuthorizationHelperImpl dataSourceUserAuthorizationHelper) {
+      this.dataSourceUserAuthorizationHelper = dataSourceUserAuthorizationHelper;
+      return this;
+    }
+
+    public SparkQueryDispatcherBuilder setJobExecutionResponseReader(
+        JobExecutionResponseReader jobExecutionResponseReader) {
+      this.jobExecutionResponseReader = jobExecutionResponseReader;
+      return this;
+    }
+
+    public SparkQueryDispatcherBuilder setFlintIndexMetadataReader(
+        FlintIndexMetadataReader flintIndexMetadataReader) {
+      this.flintIndexMetadataReader = flintIndexMetadataReader;
+      return this;
+    }
+
+    public SparkQueryDispatcherBuilder setClient(Client client) {
+      this.client = client;
+      return this;
+    }
+
+    public SparkQueryDispatcherBuilder setSessionManager(SessionManager sessionManager) {
+      this.sessionManager = sessionManager;
+      return this;
+    }
+
+    public SparkQueryDispatcherBuilder setLeaseManager(LeaseManager leaseManager) {
+      this.leaseManager = leaseManager;
+      return this;
+    }
+
+    public SparkQueryDispatcherBuilder setStateStore(StateStore stateStore) {
+      this.stateStore = stateStore;
+      return this;
+    }
+
+    public SparkQueryDispatcher build() {
+      return new SparkQueryDispatcher(this);
+    }
+  }
+
 }

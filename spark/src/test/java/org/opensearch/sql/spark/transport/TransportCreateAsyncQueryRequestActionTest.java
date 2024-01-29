@@ -24,7 +24,10 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensearch.action.support.ActionFilters;
+import org.opensearch.client.node.NodeClient;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.sql.datasources.service.DataSourceServiceImpl;
 import org.opensearch.sql.spark.asyncquery.AsyncQueryExecutorServiceImpl;
 import org.opensearch.sql.spark.rest.model.CreateAsyncQueryRequest;
 import org.opensearch.sql.spark.rest.model.CreateAsyncQueryResponse;
@@ -42,6 +45,9 @@ public class TransportCreateAsyncQueryRequestActionTest {
   @Mock private AsyncQueryExecutorServiceImpl jobExecutorService;
   @Mock private Task task;
   @Mock private ActionListener<CreateAsyncQueryActionResponse> actionListener;
+  @Mock private NodeClient client;
+  @Mock private ClusterService clusterService;
+  @Mock private DataSourceServiceImpl dataSourceService;
 
   @Captor
   private ArgumentCaptor<CreateAsyncQueryActionResponse> createJobActionResponseArgumentCaptor;
@@ -52,7 +58,11 @@ public class TransportCreateAsyncQueryRequestActionTest {
   public void setUp() {
     action =
         new TransportCreateAsyncQueryRequestAction(
-            transportService, new ActionFilters(new HashSet<>()), jobExecutorService);
+            transportService,
+            new ActionFilters(new HashSet<>()),
+            client,
+            clusterService,
+            dataSourceService);
   }
 
   @Test

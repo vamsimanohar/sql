@@ -28,7 +28,10 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensearch.action.support.ActionFilters;
+import org.opensearch.client.node.NodeClient;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.sql.datasources.service.DataSourceServiceImpl;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.spark.asyncquery.AsyncQueryExecutorServiceImpl;
 import org.opensearch.sql.spark.asyncquery.exceptions.AsyncQueryNotFoundException;
@@ -51,12 +54,19 @@ public class TransportGetAsyncQueryResultActionTest {
   private ArgumentCaptor<GetAsyncQueryResultActionResponse> createJobActionResponseArgumentCaptor;
 
   @Captor private ArgumentCaptor<Exception> exceptionArgumentCaptor;
+  @Mock private NodeClient client;
+  @Mock private ClusterService clusterService;
+  @Mock private DataSourceServiceImpl dataSourceService;
 
   @BeforeEach
   public void setUp() {
     action =
         new TransportGetAsyncQueryResultAction(
-            transportService, new ActionFilters(new HashSet<>()), jobExecutorService);
+            transportService,
+            new ActionFilters(new HashSet<>()),
+            client,
+            clusterService,
+            dataSourceService);
   }
 
   @Test
