@@ -126,8 +126,7 @@ class OpenSearchDateTypeTest {
             || SUPPORTED_NAMED_DATETIME_FORMATS.contains(formatName)
             || SUPPORTED_NAMED_DATE_FORMATS.contains(formatName)
             || SUPPORTED_NAMED_TIME_FORMATS.contains(formatName)
-            || SUPPORTED_NAMED_INCOMPLETE_DATE_FORMATS.contains(formatName)
-            || formatName.equals(FormatNames.RFC3339_LENIENT),
+            || SUPPORTED_NAMED_INCOMPLETE_DATE_FORMATS.contains(formatName),
         formatName + " not supported");
   }
 

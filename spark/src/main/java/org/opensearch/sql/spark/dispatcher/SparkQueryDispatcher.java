@@ -35,7 +35,6 @@ import org.opensearch.sql.spark.utils.SQLQueryUtils;
 @AllArgsConstructor
 public class SparkQueryDispatcher {
 
-  private static final Logger LOG = LogManager.getLogger();
   public static final String INDEX_TAG_KEY = "index";
   public static final String DATASOURCE_TAG_KEY = "datasource";
   public static final String CLUSTER_NAME_TAG_KEY = "domain_ident";
