@@ -23,7 +23,7 @@ public class PPLQueryRequest {
   private final String pplQuery;
   @Getter private final JSONObject jsonContent;
   @Getter private final String path;
-  @Getter private String format = "";
+  @Getter private String format;
 
   @Setter
   @Getter
