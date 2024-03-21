@@ -24,6 +24,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.SneakyThrows;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -37,22 +39,29 @@ import org.opensearch.sql.ppl.PPLIntegTestCase;
 
 public class DataSourceAPIsIT extends PPLIntegTestCase {
 
+  public static final Logger LOGGER = LogManager.getLogger(DataSourceAPIsIT.class);
+
   @Override
   protected void init() throws Exception {
+    LOGGER.error("Before init");
     loadIndex(Index.DATASOURCES);
+    LOGGER.error("After init");
   }
 
   @After
   public void cleanUp() throws IOException {
+    LOGGER.error("Before cleanUp");
     wipeAllClusterSettings();
+    LOGGER.error("After cleanUp");
   }
 
   @AfterClass
   protected static void deleteDataSourcesCreated() throws IOException {
+    LOGGER.error("After cleanUp");
     Request deleteRequest = getDeleteDataSourceRequest("create_prometheus");
     Response deleteResponse = client().performRequest(deleteRequest);
     Assert.assertEquals(204, deleteResponse.getStatusLine().getStatusCode());
-
+    
     deleteRequest = getDeleteDataSourceRequest("update_prometheus");
     deleteResponse = client().performRequest(deleteRequest);
     Assert.assertEquals(204, deleteResponse.getStatusLine().getStatusCode());

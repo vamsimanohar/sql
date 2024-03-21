@@ -56,6 +56,8 @@ import javax.management.remote.JMXConnector;
 import javax.management.remote.JMXConnectorFactory;
 import javax.management.remote.JMXServiceURL;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.AfterClass;
@@ -71,6 +73,8 @@ import org.opensearch.sql.datasource.model.DataSourceMetadata;
 /** OpenSearch Rest integration test base for SQL testing */
 public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
 
+  public static final Logger LOGGER = LogManager.getLogger(SQLIntegTestCase.class);
+
   public static final String PERSISTENT = "persistent";
   public static final String TRANSIENT = "transient";
   public static final Integer DEFAULT_QUERY_SIZE_LIMIT =
@@ -84,6 +88,7 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
 
   @Before
   public void setUpIndices() throws Exception {
+    LOGGER.error("Setting up indices");
     if (client() == null) {
       initClient();
     }
@@ -147,7 +152,9 @@ public abstract class SQLIntegTestCase extends OpenSearchSQLRestTestCase {
    */
   @AfterClass
   public static void cleanUpIndices() throws IOException {
+    LOGGER.error("Cleaning up indices");
     if (System.getProperty("tests.rest.bwcsuite") == null) {
+      LOGGER.error("Cleaning up indices");
       wipeAllOpenSearchIndices();
       wipeAllClusterSettings();
     }
