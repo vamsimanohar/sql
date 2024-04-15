@@ -1,4 +1,4 @@
-package org.opensearch.sql.spark.config;
+package org.opensearch.sql.asyncquery.config.model;
 
 /** Interface for extracting and providing SparkExecutionEngineConfig */
 public interface SparkExecutionEngineConfigSupplier {
