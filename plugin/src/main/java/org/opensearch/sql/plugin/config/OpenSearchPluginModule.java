@@ -6,6 +6,7 @@
 package org.opensearch.sql.plugin.config;
 
 import lombok.RequiredArgsConstructor;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.AbstractModule;
 import org.opensearch.common.inject.Provides;
 import org.opensearch.common.inject.Singleton;
@@ -22,12 +23,14 @@ import org.opensearch.sql.expression.function.BuiltinFunctionRepository;
 import org.opensearch.sql.monitor.ResourceMonitor;
 import org.opensearch.sql.opensearch.client.OpenSearchClient;
 import org.opensearch.sql.opensearch.client.OpenSearchNodeClient;
+import org.opensearch.sql.opensearch.executor.DistributedExecutionEngine;
 import org.opensearch.sql.opensearch.executor.OpenSearchExecutionEngine;
 import org.opensearch.sql.opensearch.executor.OpenSearchQueryManager;
 import org.opensearch.sql.opensearch.executor.protector.ExecutionProtector;
 import org.opensearch.sql.opensearch.executor.protector.OpenSearchExecutionProtector;
 import org.opensearch.sql.opensearch.monitor.OpenSearchMemoryHealthy;
 import org.opensearch.sql.opensearch.monitor.OpenSearchResourceMonitor;
+import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.opensearch.storage.OpenSearchStorageEngine;
 import org.opensearch.sql.planner.Planner;
 import org.opensearch.sql.planner.optimizer.LogicalPlanOptimizer;
@@ -36,6 +39,7 @@ import org.opensearch.sql.ppl.antlr.PPLSyntaxParser;
 import org.opensearch.sql.sql.SQLService;
 import org.opensearch.sql.sql.antlr.SQLSyntaxParser;
 import org.opensearch.sql.storage.StorageEngine;
+import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.node.NodeClient;
 
 @RequiredArgsConstructor
@@ -59,8 +63,23 @@ public class OpenSearchPluginModule extends AbstractModule {
 
   @Provides
   public ExecutionEngine executionEngine(
-      OpenSearchClient client, ExecutionProtector protector, PlanSerializer planSerializer) {
-    return new OpenSearchExecutionEngine(client, protector, planSerializer);
+      OpenSearchClient client,
+      ExecutionProtector protector,
+      PlanSerializer planSerializer,
+      Settings settings,
+      TransportService transportService,
+      ClusterService clusterService) {
+    // Create legacy engine for fallback
+    OpenSearchExecutionEngine legacyEngine =
+        new OpenSearchExecutionEngine(client, protector, planSerializer);
+
+    // Create OpenSearchSettings instance for distributed configuration
+    OpenSearchSettings openSearchSettings =
+        new OpenSearchSettings(clusterService.getClusterSettings());
+
+    // Return distributed engine that wraps legacy engine
+    return new DistributedExecutionEngine(
+        legacyEngine, openSearchSettings, transportService, clusterService);
   }
 
   @Provides

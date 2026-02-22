@@ -14,17 +14,19 @@ import lombok.NoArgsConstructor;
  * Represents a partition of data that can be processed independently by a work unit.
  *
  * <p>Data partitions abstract the storage-specific details of how data is divided:
+ *
  * <ul>
- *   <li>For Lucene: Represents an OpenSearch shard</li>
- *   <li>For Parquet: Represents a file or file group</li>
- *   <li>For future formats: Represents appropriate storage unit</li>
+ *   <li>For Lucene: Represents an OpenSearch shard
+ *   <li>For Parquet: Represents a file or file group
+ *   <li>For future formats: Represents appropriate storage unit
  * </ul>
  *
  * <p>The partition contains metadata needed for the task operator to:
+ *
  * <ul>
- *   <li>Locate the data (index, shard, file path, etc.)</li>
- *   <li>Apply filters and projections efficiently</li>
- *   <li>Coordinate with storage-specific optimizations</li>
+ *   <li>Locate the data (index, shard, file path, etc.)
+ *   <li>Apply filters and projections efficiently
+ *   <li>Coordinate with storage-specific optimizations
  * </ul>
  */
 @Data
@@ -47,9 +49,7 @@ public class DataPartition {
   /** Storage-specific metadata for partition access */
   private Map<String, Object> metadata;
 
-  /**
-   * Enumeration of supported storage types for data partitions.
-   */
+  /** Enumeration of supported storage types for data partitions. */
   public enum StorageType {
     /** OpenSearch Lucene indexes - current implementation target */
     LUCENE,
@@ -100,11 +100,7 @@ public class DataPartition {
   public static DataPartition createParquetPartition(
       String fileId, String filePath, long estimatedSize) {
     return new DataPartition(
-        fileId,
-        StorageType.PARQUET,
-        filePath,
-        estimatedSize,
-        Map.of("filePath", filePath));
+        fileId, StorageType.PARQUET, filePath, estimatedSize, Map.of("filePath", filePath));
   }
 
   /**

@@ -10,11 +10,12 @@ import org.opensearch.action.ActionType;
 /**
  * Transport action for executing distributed query tasks on remote cluster nodes.
  *
- * <p>This action enables the DistributedTaskScheduler to send WorkUnits to specific
- * nodes for execution. Each node receives a set of WorkUnits and executes them
- * locally, returning results back to the coordinator.
+ * <p>This action enables the DistributedTaskScheduler to send WorkUnits to specific nodes for
+ * execution. Each node receives a set of WorkUnits and executes them locally, returning results
+ * back to the coordinator.
  *
  * <p><strong>Usage:</strong>
+ *
  * <pre>
  * TransportService.sendRequest(
  *   targetNode,
@@ -24,8 +25,7 @@ import org.opensearch.action.ActionType;
  * );
  * </pre>
  */
-public class ExecuteDistributedTaskAction
-    extends ActionType<ExecuteDistributedTaskResponse> {
+public class ExecuteDistributedTaskAction extends ActionType<ExecuteDistributedTaskResponse> {
 
   /** Action name used for transport routing */
   public static final String NAME = "cluster:admin/opensearch/sql/distributed/execute";

@@ -16,15 +16,16 @@ import org.opensearch.sql.data.type.ExprType;
  * Represents an operation that can be executed by a work unit on distributed data.
  *
  * <p>Task operators abstract the actual computation logic from the distribution framework:
+ *
  * <ul>
- *   <li>Scan operators read data from storage (Lucene, Parquet, etc.)</li>
- *   <li>Aggregation operators perform grouping and aggregation functions</li>
- *   <li>Filter operators apply predicates to data</li>
- *   <li>Join operators combine data from multiple sources</li>
+ *   <li>Scan operators read data from storage (Lucene, Parquet, etc.)
+ *   <li>Aggregation operators perform grouping and aggregation functions
+ *   <li>Filter operators apply predicates to data
+ *   <li>Join operators combine data from multiple sources
  * </ul>
  *
- * <p>Each operator encapsulates its configuration and can be serialized for
- * transmission to remote nodes during distributed execution.
+ * <p>Each operator encapsulates its configuration and can be serialized for transmission to remote
+ * nodes during distributed execution.
  */
 @Data
 @AllArgsConstructor
@@ -40,9 +41,7 @@ public abstract class TaskOperator {
   /** Configuration parameters for the operator */
   private Map<String, Object> config;
 
-  /**
-   * Enumeration of task operator types supported in distributed execution.
-   */
+  /** Enumeration of task operator types supported in distributed execution. */
   public enum OperatorType {
     /** Scan data from storage (Lucene indexes, Parquet files, etc.) */
     SCAN,
@@ -98,17 +97,15 @@ public abstract class TaskOperator {
   public abstract Map<String, ExprType> getOutputSchema();
 
   /**
-   * Estimates the computational cost of executing this operator.
-   * Used for query optimization and scheduling decisions.
+   * Estimates the computational cost of executing this operator. Used for query optimization and
+   * scheduling decisions.
    *
    * @param inputSize Estimated input data size in bytes
    * @return Estimated computational cost (arbitrary units)
    */
   public abstract double estimateCost(long inputSize);
 
-  /**
-   * Input data and configuration for task operator execution.
-   */
+  /** Input data and configuration for task operator execution. */
   @Data
   @AllArgsConstructor
   @NoArgsConstructor
@@ -138,9 +135,7 @@ public abstract class TaskOperator {
     private Map<String, Object> parameters;
   }
 
-  /**
-   * Output data and metadata from task operator execution.
-   */
+  /** Output data and metadata from task operator execution. */
   @Data
   @AllArgsConstructor
   @NoArgsConstructor
@@ -161,9 +156,7 @@ public abstract class TaskOperator {
     private boolean isPartialResult;
   }
 
-  /**
-   * Execution context providing runtime information to task operators.
-   */
+  /** Execution context providing runtime information to task operators. */
   @Data
   @AllArgsConstructor
   @NoArgsConstructor

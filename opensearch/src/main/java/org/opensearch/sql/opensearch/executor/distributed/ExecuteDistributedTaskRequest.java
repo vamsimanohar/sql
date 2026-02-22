@@ -20,12 +20,11 @@ import org.opensearch.sql.planner.distributed.WorkUnit;
 /**
  * Request message for executing distributed query tasks on a remote node.
  *
- * <p>Contains the work units to be executed, along with context information
- * needed for execution such as stage ID and input data from previous stages.
+ * <p>Contains the work units to be executed, along with context information needed for execution
+ * such as stage ID and input data from previous stages.
  *
- * <p><strong>Serialization:</strong>
- * This class implements OpenSearch's Streamable interface for efficient
- * network serialization between cluster nodes.
+ * <p><strong>Serialization:</strong> This class implements OpenSearch's Streamable interface for
+ * efficient network serialization between cluster nodes.
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
@@ -42,9 +41,7 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
   /** Input data from previous stages (null for initial scan stages) */
   private Object inputData;
 
-  /**
-   * Constructor for deserialization from stream.
-   */
+  /** Constructor for deserialization from stream. */
   public ExecuteDistributedTaskRequest(StreamInput in) throws IOException {
     super(in);
     // TODO: Phase 1 - Implement proper serialization for WorkUnit and inputData
@@ -57,9 +54,7 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
     this.inputData = null; // Placeholder
   }
 
-  /**
-   * Serializes this request to a stream for network transport.
-   */
+  /** Serializes this request to a stream for network transport. */
   @Override
   public void writeTo(StreamOutput out) throws IOException {
     super.writeTo(out);
@@ -81,9 +76,7 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
     return stageId != null && !stageId.isEmpty() && workUnits != null;
   }
 
-  /**
-   * Gets the number of work units in this request.
-   */
+  /** Gets the number of work units in this request. */
   public int getWorkUnitCount() {
     return workUnits != null ? workUnits.size() : 0;
   }
@@ -110,7 +103,6 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
   @Override
   public String toString() {
     return String.format(
-        "ExecuteDistributedTaskRequest{stageId='%s', workUnits=%d}",
-        stageId, getWorkUnitCount());
+        "ExecuteDistributedTaskRequest{stageId='%s', workUnits=%d}", stageId, getWorkUnitCount());
   }
 }

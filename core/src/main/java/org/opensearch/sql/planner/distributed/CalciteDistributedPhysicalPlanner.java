@@ -27,22 +27,24 @@ import org.opensearch.sql.executor.ExecutionEngine.Schema.Column;
 /**
  * Converts Calcite RelNode trees into multi-stage distributed execution plans.
  *
- * <p>The Calcite-based distributed physical planner analyzes PPL queries that have been
- * converted to Calcite RelNode trees and breaks them into stages that can be executed
- * across multiple nodes in parallel:
+ * <p>The Calcite-based distributed physical planner analyzes PPL queries that have been converted
+ * to Calcite RelNode trees and breaks them into stages that can be executed across multiple nodes
+ * in parallel:
  *
  * <ul>
- *   <li><strong>Stage 1 (SCAN)</strong>: Direct shard access with filters and projections</li>
- *   <li><strong>Stage 2 (PROCESS)</strong>: Partial aggregations on each node</li>
- *   <li><strong>Stage 3 (FINALIZE)</strong>: Global aggregation on coordinator</li>
+ *   <li><strong>Stage 1 (SCAN)</strong>: Direct shard access with filters and projections
+ *   <li><strong>Stage 2 (PROCESS)</strong>: Partial aggregations on each node
+ *   <li><strong>Stage 3 (FINALIZE)</strong>: Global aggregation on coordinator
  * </ul>
  *
  * <p><strong>Phase 1 Support:</strong> Simple aggregation queries with filters
+ *
  * <pre>
  * search source=logs-* | where status >= 400 | stats count(), avg(latency) by service
  * </pre>
  *
  * <p>This maps to Calcite RelNode tree:
+ *
  * <pre>
  * LogicalAggregate(group=[{service}], agg#0=[COUNT()], agg#1=[AVG(latency)])
  *   LogicalFilter(condition=[>=(status, 400)])
@@ -91,8 +93,8 @@ public class CalciteDistributedPhysicalPlanner {
       List<ExecutionStage> stages = createExecutionStages(analysis);
 
       // Build the final distributed plan
-      DistributedPhysicalPlan distributedPlan = DistributedPhysicalPlan.create(
-          planId, stages, analysis.getOutputSchema());
+      DistributedPhysicalPlan distributedPlan =
+          DistributedPhysicalPlan.create(planId, stages, analysis.getOutputSchema());
 
       log.info("Created Calcite distributed plan {} with {} stages", planId, stages.size());
       return distributedPlan;
@@ -103,17 +105,13 @@ public class CalciteDistributedPhysicalPlanner {
     }
   }
 
-  /**
-   * Analyzes the RelNode tree to determine distributed execution feasibility.
-   */
+  /** Analyzes the RelNode tree to determine distributed execution feasibility. */
   private RelNodeAnalysis analyzeRelNode(RelNode relNode, CalcitePlanContext context) {
     RelNodeAnalyzer analyzer = new RelNodeAnalyzer();
     return analyzer.analyze(relNode, context);
   }
 
-  /**
-   * Creates execution stages from the RelNode analysis.
-   */
+  /** Creates execution stages from the RelNode analysis. */
   private List<ExecutionStage> createExecutionStages(RelNodeAnalysis analysis) {
     List<ExecutionStage> stages = new ArrayList<>();
 
@@ -138,9 +136,7 @@ public class CalciteDistributedPhysicalPlanner {
     return stages;
   }
 
-  /**
-   * Creates Stage 1: Distributed scanning with filters and projections.
-   */
+  /** Creates Stage 1: Distributed scanning with filters and projections. */
   private ExecutionStage createScanStage(RelNodeAnalysis analysis) {
     String stageId = "calcite-scan-stage-" + UUID.randomUUID().toString().substring(0, 8);
 
@@ -148,134 +144,120 @@ public class CalciteDistributedPhysicalPlanner {
     List<DataPartition> partitions = partitionDiscovery.discoverPartitions(analysis.getTableName());
 
     // Create work units for each partition (shard)
-    List<WorkUnit> workUnits = partitions.stream()
-        .map(partition -> createScanWorkUnit(partition, analysis))
-        .collect(Collectors.toList());
+    List<WorkUnit> workUnits =
+        partitions.stream()
+            .map(partition -> createScanWorkUnit(partition, analysis))
+            .collect(Collectors.toList());
 
     log.debug("Created Calcite scan stage {} with {} work units", stageId, workUnits.size());
 
     return ExecutionStage.createScanStage(stageId, workUnits);
   }
 
-  /**
-   * Creates a scan work unit for a specific partition.
-   */
+  /** Creates a scan work unit for a specific partition. */
   private WorkUnit createScanWorkUnit(DataPartition partition, RelNodeAnalysis analysis) {
     String workUnitId = "calcite-scan-" + partition.getPartitionId();
 
     // Create scan operator with filter and projection
-    TaskOperator scanOperator = new CalciteLuceneScanOperator(
-        workUnitId + "-op",
-        TaskOperator.OperatorType.SCAN,
-        Map.of(
-            "filters", analysis.getFilterConditions(),
-            "projections", analysis.getProjections(),
-            "indexName", partition.getIndexName(),
-            "shardId", partition.getShardId(),
-            "relNodeInfo", analysis.getRelNodeInfo()));
+    TaskOperator scanOperator =
+        new CalciteLuceneScanOperator(
+            workUnitId + "-op",
+            TaskOperator.OperatorType.SCAN,
+            Map.of(
+                "filters", analysis.getFilterConditions(),
+                "projections", analysis.getProjections(),
+                "indexName", partition.getIndexName(),
+                "shardId", partition.getShardId(),
+                "relNodeInfo", analysis.getRelNodeInfo()));
 
-    return WorkUnit.createScanUnit(
-        workUnitId,
-        partition,
-        scanOperator,
-        partition.getNodeId());
+    return WorkUnit.createScanUnit(workUnitId, partition, scanOperator, partition.getNodeId());
   }
 
-  /**
-   * Creates Stage 2: Partial aggregation processing.
-   */
-  private ExecutionStage createPartialAggregationStage(RelNodeAnalysis analysis, String scanStageId) {
+  /** Creates Stage 2: Partial aggregation processing. */
+  private ExecutionStage createPartialAggregationStage(
+      RelNodeAnalysis analysis, String scanStageId) {
     String stageId = "calcite-partial-agg-stage-" + UUID.randomUUID().toString().substring(0, 8);
 
     // Create work units for partial aggregation (one per node that has data)
     // For Phase 1, we'll create a simple work unit per expected node
-    List<WorkUnit> workUnits = IntStream.range(0, 3) // Assume 3 data nodes for now
-        .mapToObj(i -> createPartialAggregationWorkUnit(i, analysis, scanStageId))
-        .collect(Collectors.toList());
+    List<WorkUnit> workUnits =
+        IntStream.range(0, 3) // Assume 3 data nodes for now
+            .mapToObj(i -> createPartialAggregationWorkUnit(i, analysis, scanStageId))
+            .collect(Collectors.toList());
 
-    log.debug("Created Calcite partial aggregation stage {} with {} work units", stageId, workUnits.size());
+    log.debug(
+        "Created Calcite partial aggregation stage {} with {} work units",
+        stageId,
+        workUnits.size());
 
     return ExecutionStage.createProcessStage(
-        stageId,
-        workUnits,
-        List.of(scanStageId),
-        ExecutionStage.DataExchangeType.NONE);
+        stageId, workUnits, List.of(scanStageId), ExecutionStage.DataExchangeType.NONE);
   }
 
-  /**
-   * Creates a partial aggregation work unit.
-   */
-  private WorkUnit createPartialAggregationWorkUnit(int nodeIndex, RelNodeAnalysis analysis, String scanStageId) {
+  /** Creates a partial aggregation work unit. */
+  private WorkUnit createPartialAggregationWorkUnit(
+      int nodeIndex, RelNodeAnalysis analysis, String scanStageId) {
     String workUnitId = "calcite-partial-agg-" + nodeIndex;
 
-    TaskOperator aggregationOperator = new CalcitePartialAggregationOperator(
-        workUnitId + "-op",
-        TaskOperator.OperatorType.PARTIAL_AGGREGATE,
-        Map.of(
-            "groupByFields", analysis.getGroupByFields(),
-            "aggregations", analysis.getAggregations(),
-            "nodeIndex", nodeIndex,
-            "relNodeInfo", analysis.getRelNodeInfo()));
+    TaskOperator aggregationOperator =
+        new CalcitePartialAggregationOperator(
+            workUnitId + "-op",
+            TaskOperator.OperatorType.PARTIAL_AGGREGATE,
+            Map.of(
+                "groupByFields", analysis.getGroupByFields(),
+                "aggregations", analysis.getAggregations(),
+                "nodeIndex", nodeIndex,
+                "relNodeInfo", analysis.getRelNodeInfo()));
 
-    return WorkUnit.createProcessUnit(
-        workUnitId,
-        aggregationOperator,
-        List.of(scanStageId));
+    return WorkUnit.createProcessUnit(workUnitId, aggregationOperator, List.of(scanStageId));
   }
 
-  /**
-   * Creates Stage 3: Final aggregation.
-   */
-  private ExecutionStage createFinalAggregationStage(RelNodeAnalysis analysis, String processStageId) {
+  /** Creates Stage 3: Final aggregation. */
+  private ExecutionStage createFinalAggregationStage(
+      RelNodeAnalysis analysis, String processStageId) {
     String stageId = "calcite-final-agg-stage-" + UUID.randomUUID().toString().substring(0, 8);
     String workUnitId = "calcite-final-agg";
 
-    TaskOperator finalOperator = new CalciteFinalAggregationOperator(
-        workUnitId + "-op",
-        TaskOperator.OperatorType.FINAL_AGGREGATE,
-        Map.of(
-            "groupByFields", analysis.getGroupByFields(),
-            "aggregations", analysis.getAggregations(),
-            "relNodeInfo", analysis.getRelNodeInfo()));
+    TaskOperator finalOperator =
+        new CalciteFinalAggregationOperator(
+            workUnitId + "-op",
+            TaskOperator.OperatorType.FINAL_AGGREGATE,
+            Map.of(
+                "groupByFields", analysis.getGroupByFields(),
+                "aggregations", analysis.getAggregations(),
+                "relNodeInfo", analysis.getRelNodeInfo()));
 
-    WorkUnit finalWorkUnit = WorkUnit.createFinalizeUnit(
-        workUnitId,
-        finalOperator,
-        List.of(processStageId));
+    WorkUnit finalWorkUnit =
+        WorkUnit.createFinalizeUnit(workUnitId, finalOperator, List.of(processStageId));
 
     log.debug("Created Calcite final aggregation stage {}", stageId);
 
     return ExecutionStage.createFinalizeStage(stageId, finalWorkUnit, List.of(processStageId));
   }
 
-  /**
-   * Creates a result collection stage for non-aggregation queries.
-   */
+  /** Creates a result collection stage for non-aggregation queries. */
   private ExecutionStage createResultCollectionStage(RelNodeAnalysis analysis, String scanStageId) {
     String stageId = "calcite-collect-stage-" + UUID.randomUUID().toString().substring(0, 8);
     String workUnitId = "calcite-collect-results";
 
-    TaskOperator collectOperator = new CalciteResultCollectionOperator(
-        workUnitId + "-op",
-        TaskOperator.OperatorType.FINALIZE,
-        Map.of(
-            "limit", analysis.getLimit(),
-            "sortFields", analysis.getSortFields(),
-            "relNodeInfo", analysis.getRelNodeInfo()));
+    TaskOperator collectOperator =
+        new CalciteResultCollectionOperator(
+            workUnitId + "-op",
+            TaskOperator.OperatorType.FINALIZE,
+            Map.of(
+                "limit", analysis.getLimit(),
+                "sortFields", analysis.getSortFields(),
+                "relNodeInfo", analysis.getRelNodeInfo()));
 
-    WorkUnit collectWorkUnit = WorkUnit.createFinalizeUnit(
-        workUnitId,
-        collectOperator,
-        List.of(scanStageId));
+    WorkUnit collectWorkUnit =
+        WorkUnit.createFinalizeUnit(workUnitId, collectOperator, List.of(scanStageId));
 
     log.debug("Created Calcite result collection stage {}", stageId);
 
     return ExecutionStage.createFinalizeStage(stageId, collectWorkUnit, List.of(scanStageId));
   }
 
-  /**
-   * Analyzer that extracts distributed execution information from RelNode trees.
-   */
+  /** Analyzer that extracts distributed execution information from RelNode trees. */
   private static class RelNodeAnalyzer {
 
     public RelNodeAnalysis analyze(RelNode relNode, CalcitePlanContext context) {
@@ -333,10 +315,13 @@ public class CalciteDistributedPhysicalPlanner {
     }
 
     private void analyzeProject(Project project, RelNodeAnalysis analysis) {
-      project.getProjects().forEach(expr -> {
-        String exprStr = expr.toString();
-        analysis.addProjection(exprStr, exprStr);
-      });
+      project
+          .getProjects()
+          .forEach(
+              expr -> {
+                String exprStr = expr.toString();
+                analysis.addProjection(exprStr, exprStr);
+              });
       log.debug("Found projection with {} expressions", project.getProjects().size());
     }
 
@@ -344,28 +329,39 @@ public class CalciteDistributedPhysicalPlanner {
       analysis.setHasAggregation(true);
 
       // Extract group by fields
-      aggregate.getGroupSet().forEach(groupIndex -> {
-        String fieldName = "field_" + groupIndex; // Simplified for Phase 1
-        analysis.addGroupByField(fieldName);
-      });
+      aggregate
+          .getGroupSet()
+          .forEach(
+              groupIndex -> {
+                String fieldName = "field_" + groupIndex; // Simplified for Phase 1
+                analysis.addGroupByField(fieldName);
+              });
 
       // Extract aggregation calls
-      aggregate.getAggCallList().forEach(aggCall -> {
-        String aggName = aggCall.getAggregation().getName();
-        String aggExpr = aggCall.toString();
-        analysis.addAggregation(aggName, aggExpr);
-      });
+      aggregate
+          .getAggCallList()
+          .forEach(
+              aggCall -> {
+                String aggName = aggCall.getAggregation().getName();
+                String aggExpr = aggCall.toString();
+                analysis.addAggregation(aggName, aggExpr);
+              });
 
-      log.debug("Found aggregation with {} groups and {} agg calls",
-          aggregate.getGroupCount(), aggregate.getAggCallList().size());
+      log.debug(
+          "Found aggregation with {} groups and {} agg calls",
+          aggregate.getGroupCount(),
+          aggregate.getAggCallList().size());
     }
 
     private void analyzeSort(Sort sort, RelNodeAnalysis analysis) {
       if (sort.getCollation() != null) {
-        sort.getCollation().getFieldCollations().forEach(field -> {
-          String fieldName = "field_" + field.getFieldIndex();
-          analysis.addSortField(fieldName);
-        });
+        sort.getCollation()
+            .getFieldCollations()
+            .forEach(
+                field -> {
+                  String fieldName = "field_" + field.getFieldIndex();
+                  analysis.addSortField(fieldName);
+                });
       }
 
       if (sort.fetch != null) {
@@ -381,19 +377,20 @@ public class CalciteDistributedPhysicalPlanner {
 
       if (analysis.hasAggregation()) {
         // Add group by columns
-        analysis.getGroupByFields().forEach(field ->
-            columns.add(new Column(field, null, null)));
+        analysis.getGroupByFields().forEach(field -> columns.add(new Column(field, null, null)));
 
         // Add aggregation columns
-        analysis.getAggregations().forEach((name, func) ->
-            columns.add(new Column(name, null, null)));
+        analysis
+            .getAggregations()
+            .forEach((name, func) -> columns.add(new Column(name, null, null)));
       } else {
         // Add projection columns or all fields
         if (analysis.getProjections().isEmpty()) {
           columns.add(new Column("*", null, null));
         } else {
-          analysis.getProjections().forEach((alias, expr) ->
-              columns.add(new Column(alias, null, null)));
+          analysis
+              .getProjections()
+              .forEach((alias, expr) -> columns.add(new Column(alias, null, null)));
         }
       }
 
@@ -401,9 +398,7 @@ public class CalciteDistributedPhysicalPlanner {
     }
   }
 
-  /**
-   * Analysis result for RelNode trees.
-   */
+  /** Analysis result for RelNode trees. */
   private static class RelNodeAnalysis {
     private String tableName;
     private List<String> filterConditions = new ArrayList<>();
@@ -419,45 +414,103 @@ public class CalciteDistributedPhysicalPlanner {
     private Map<String, String> relNodeInfo = new HashMap<>();
 
     // Getters and setters
-    public String getTableName() { return tableName; }
-    public void setTableName(String tableName) { this.tableName = tableName; }
+    public String getTableName() {
+      return tableName;
+    }
 
-    public List<String> getFilterConditions() { return filterConditions; }
-    public void addFilterCondition(String condition) { filterConditions.add(condition); }
+    public void setTableName(String tableName) {
+      this.tableName = tableName;
+    }
 
-    public Map<String, String> getProjections() { return projections; }
-    public void addProjection(String alias, String expression) { projections.put(alias, expression); }
+    public List<String> getFilterConditions() {
+      return filterConditions;
+    }
 
-    public boolean hasAggregation() { return hasAggregation; }
-    public void setHasAggregation(boolean hasAggregation) { this.hasAggregation = hasAggregation; }
+    public void addFilterCondition(String condition) {
+      filterConditions.add(condition);
+    }
 
-    public List<String> getGroupByFields() { return groupByFields; }
-    public void addGroupByField(String field) { groupByFields.add(field); }
+    public Map<String, String> getProjections() {
+      return projections;
+    }
 
-    public Map<String, String> getAggregations() { return aggregations; }
-    public void addAggregation(String name, String function) { aggregations.put(name, function); }
+    public void addProjection(String alias, String expression) {
+      projections.put(alias, expression);
+    }
 
-    public List<String> getSortFields() { return sortFields; }
-    public void addSortField(String field) { sortFields.add(field); }
+    public boolean hasAggregation() {
+      return hasAggregation;
+    }
 
-    public Integer getLimit() { return limit; }
-    public void setLimit(Integer limit) { this.limit = limit; }
+    public void setHasAggregation(boolean hasAggregation) {
+      this.hasAggregation = hasAggregation;
+    }
 
-    public boolean isDistributable() { return distributable; }
-    public void setDistributable(boolean distributable) { this.distributable = distributable; }
+    public List<String> getGroupByFields() {
+      return groupByFields;
+    }
 
-    public String getReason() { return reason; }
-    public void setReason(String reason) { this.reason = reason; }
+    public void addGroupByField(String field) {
+      groupByFields.add(field);
+    }
 
-    public Schema getOutputSchema() { return outputSchema; }
-    public void setOutputSchema(Schema outputSchema) { this.outputSchema = outputSchema; }
+    public Map<String, String> getAggregations() {
+      return aggregations;
+    }
 
-    public Map<String, String> getRelNodeInfo() { return relNodeInfo; }
+    public void addAggregation(String name, String function) {
+      aggregations.put(name, function);
+    }
+
+    public List<String> getSortFields() {
+      return sortFields;
+    }
+
+    public void addSortField(String field) {
+      sortFields.add(field);
+    }
+
+    public Integer getLimit() {
+      return limit;
+    }
+
+    public void setLimit(Integer limit) {
+      this.limit = limit;
+    }
+
+    public boolean isDistributable() {
+      return distributable;
+    }
+
+    public void setDistributable(boolean distributable) {
+      this.distributable = distributable;
+    }
+
+    public String getReason() {
+      return reason;
+    }
+
+    public void setReason(String reason) {
+      this.reason = reason;
+    }
+
+    public Schema getOutputSchema() {
+      return outputSchema;
+    }
+
+    public void setOutputSchema(Schema outputSchema) {
+      this.outputSchema = outputSchema;
+    }
+
+    public Map<String, String> getRelNodeInfo() {
+      return relNodeInfo;
+    }
   }
 
   // Placeholder Calcite-aware task operators - will be implemented in task 4
   private static class CalciteLuceneScanOperator extends TaskOperator {
-    public CalciteLuceneScanOperator(String operatorId, OperatorType operatorType, Map<String, Object> config) {
+    public CalciteLuceneScanOperator(
+        String operatorId, OperatorType operatorType, Map<String, Object> config) {
       super(operatorId, operatorType, config);
     }
 
@@ -478,13 +531,15 @@ public class CalciteDistributedPhysicalPlanner {
   }
 
   private static class CalcitePartialAggregationOperator extends TaskOperator {
-    public CalcitePartialAggregationOperator(String operatorId, OperatorType operatorType, Map<String, Object> config) {
+    public CalcitePartialAggregationOperator(
+        String operatorId, OperatorType operatorType, Map<String, Object> config) {
       super(operatorId, operatorType, config);
     }
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      throw new UnsupportedOperationException("CalcitePartialAggregationOperator implementation pending");
+      throw new UnsupportedOperationException(
+          "CalcitePartialAggregationOperator implementation pending");
     }
 
     @Override
@@ -499,13 +554,15 @@ public class CalciteDistributedPhysicalPlanner {
   }
 
   private static class CalciteFinalAggregationOperator extends TaskOperator {
-    public CalciteFinalAggregationOperator(String operatorId, OperatorType operatorType, Map<String, Object> config) {
+    public CalciteFinalAggregationOperator(
+        String operatorId, OperatorType operatorType, Map<String, Object> config) {
       super(operatorId, operatorType, config);
     }
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      throw new UnsupportedOperationException("CalciteFinalAggregationOperator implementation pending");
+      throw new UnsupportedOperationException(
+          "CalciteFinalAggregationOperator implementation pending");
     }
 
     @Override
@@ -520,13 +577,15 @@ public class CalciteDistributedPhysicalPlanner {
   }
 
   private static class CalciteResultCollectionOperator extends TaskOperator {
-    public CalciteResultCollectionOperator(String operatorId, OperatorType operatorType, Map<String, Object> config) {
+    public CalciteResultCollectionOperator(
+        String operatorId, OperatorType operatorType, Map<String, Object> config) {
       super(operatorId, operatorType, config);
     }
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      throw new UnsupportedOperationException("CalciteResultCollectionOperator implementation pending");
+      throw new UnsupportedOperationException(
+          "CalciteResultCollectionOperator implementation pending");
     }
 
     @Override

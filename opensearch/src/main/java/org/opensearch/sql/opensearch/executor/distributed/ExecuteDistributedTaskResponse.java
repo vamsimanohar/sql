@@ -19,15 +19,16 @@ import org.opensearch.core.common.io.stream.StreamOutput;
 /**
  * Response message containing results from distributed query task execution.
  *
- * <p>Contains the execution results, performance metrics, and any error
- * information from executing WorkUnits on a remote cluster node.
+ * <p>Contains the execution results, performance metrics, and any error information from executing
+ * WorkUnits on a remote cluster node.
  *
- * <p><strong>Result Format:</strong>
- * Results are returned as generic Objects to support different data types:
+ * <p><strong>Result Format:</strong> Results are returned as generic Objects to support different
+ * data types:
+ *
  * <ul>
- *   <li>SCAN stage: Filtered and projected document data</li>
- *   <li>PROCESS stage: Partial aggregation results</li>
- *   <li>FINALIZE stage: Final query results</li>
+ *   <li>SCAN stage: Filtered and projected document data
+ *   <li>PROCESS stage: Partial aggregation results
+ *   <li>FINALIZE stage: Final query results
  * </ul>
  */
 @Data
@@ -51,9 +52,7 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
   /** Error message if execution failed */
   private String errorMessage;
 
-  /**
-   * Constructor for deserialization from stream.
-   */
+  /** Constructor for deserialization from stream. */
   public ExecuteDistributedTaskResponse(StreamInput in) throws IOException {
     super(in);
 
@@ -68,9 +67,7 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
     this.executionStats = Map.of(); // Placeholder
   }
 
-  /**
-   * Serializes this response to a stream for network transport.
-   */
+  /** Serializes this response to a stream for network transport. */
   @Override
   public void writeTo(StreamOutput out) throws IOException {
     out.writeString(nodeId != null ? nodeId : "");
@@ -81,33 +78,23 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
     // For now, we write minimal placeholder data
   }
 
-  /**
-   * Creates a successful response with results.
-   */
+  /** Creates a successful response with results. */
   public static ExecuteDistributedTaskResponse success(
-      String nodeId,
-      List<Object> results,
-      Map<String, Object> stats) {
+      String nodeId, List<Object> results, Map<String, Object> stats) {
     return new ExecuteDistributedTaskResponse(results, stats, nodeId, true, null);
   }
 
-  /**
-   * Creates a failure response with error information.
-   */
+  /** Creates a failure response with error information. */
   public static ExecuteDistributedTaskResponse failure(String nodeId, String errorMessage) {
     return new ExecuteDistributedTaskResponse(List.of(), Map.of(), nodeId, false, errorMessage);
   }
 
-  /**
-   * Gets the number of results returned.
-   */
+  /** Gets the number of results returned. */
   public int getResultCount() {
     return results != null ? results.size() : 0;
   }
 
-  /**
-   * Checks if the execution was successful.
-   */
+  /** Checks if the execution was successful. */
   public boolean isSuccessful() {
     return success && errorMessage == null;
   }

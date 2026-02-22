@@ -90,6 +90,8 @@ import org.opensearch.sql.legacy.metrics.Metrics;
 import org.opensearch.sql.legacy.plugin.RestSqlAction;
 import org.opensearch.sql.legacy.plugin.RestSqlStatsAction;
 import org.opensearch.sql.opensearch.client.OpenSearchNodeClient;
+import org.opensearch.sql.opensearch.executor.distributed.ExecuteDistributedTaskResponse;
+import org.opensearch.sql.opensearch.executor.distributed.TransportExecuteDistributedTaskAction;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.opensearch.storage.OpenSearchDataSourceFactory;
 import org.opensearch.sql.opensearch.storage.script.CompoundedScriptEngine;
@@ -225,7 +227,11 @@ public class SQLPlugin extends Plugin
             new ActionType<>(
                 TransportWriteDirectQueryResourcesRequestAction.NAME,
                 WriteDirectQueryResourcesActionResponse::new),
-            TransportWriteDirectQueryResourcesRequestAction.class));
+            TransportWriteDirectQueryResourcesRequestAction.class),
+        new ActionHandler<>(
+            new ActionType<>(
+                TransportExecuteDistributedTaskAction.NAME, ExecuteDistributedTaskResponse::new),
+            TransportExecuteDistributedTaskAction.class));
   }
 
   @Override

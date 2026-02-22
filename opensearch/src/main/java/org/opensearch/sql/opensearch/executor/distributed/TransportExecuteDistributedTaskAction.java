@@ -23,26 +23,27 @@ import org.opensearch.transport.TransportService;
 /**
  * Transport action handler for executing distributed query tasks on data nodes.
  *
- * <p>This handler runs on each cluster node and processes ExecuteDistributedTaskRequest
- * messages from the coordinator. It executes the received WorkUnits locally and
- * returns results via ExecuteDistributedTaskResponse.
+ * <p>This handler runs on each cluster node and processes ExecuteDistributedTaskRequest messages
+ * from the coordinator. It executes the received WorkUnits locally and returns results via
+ * ExecuteDistributedTaskResponse.
  *
  * <p><strong>Execution Process:</strong>
+ *
  * <ol>
- *   <li>Receive WorkUnits from coordinator node</li>
- *   <li>Execute each WorkUnit using its TaskOperator</li>
- *   <li>Collect results and execution statistics</li>
- *   <li>Return aggregated results to coordinator</li>
+ *   <li>Receive WorkUnits from coordinator node
+ *   <li>Execute each WorkUnit using its TaskOperator
+ *   <li>Collect results and execution statistics
+ *   <li>Return aggregated results to coordinator
  * </ol>
  *
- * <p><strong>Phase 1 Implementation:</strong>
- * - Basic WorkUnit execution framework
- * - Simple error handling and logging
- * - Placeholder task operator execution
+ * <p><strong>Phase 1 Implementation:</strong> - Basic WorkUnit execution framework - Simple error
+ * handling and logging - Placeholder task operator execution
  */
 @Log4j2
 public class TransportExecuteDistributedTaskAction
     extends HandledTransportAction<ExecuteDistributedTaskRequest, ExecuteDistributedTaskResponse> {
+
+  public static final String NAME = "cluster:admin/opensearch/sql/distributed/execute";
 
   private final ClusterService clusterService;
 
@@ -66,8 +67,11 @@ public class TransportExecuteDistributedTaskAction
       ActionListener<ExecuteDistributedTaskResponse> listener) {
 
     String nodeId = clusterService.localNode().getId();
-    log.info("Executing {} work units on node: {} for stage: {}",
-        request.getWorkUnitCount(), nodeId, request.getStageId());
+    log.info(
+        "Executing {} work units on node: {} for stage: {}",
+        request.getWorkUnitCount(),
+        nodeId,
+        request.getStageId());
 
     try {
       // Validate request
@@ -96,8 +100,8 @@ public class TransportExecuteDistributedTaskAction
           successCount++;
 
         } catch (Exception e) {
-          log.error("Failed to execute work unit: {} on node: {}",
-              workUnit.getWorkUnitId(), nodeId, e);
+          log.error(
+              "Failed to execute work unit: {} on node: {}", workUnit.getWorkUnitId(), nodeId, e);
           errorCount++;
 
           // For Phase 1, we'll continue with other work units on error
@@ -113,18 +117,24 @@ public class TransportExecuteDistributedTaskAction
       executionStats.put("resultCount", allResults.size());
       executionStats.put("nodeId", nodeId);
 
-      log.info("Completed execution on node: {} - {} results, {} successes, {} errors in {}ms",
-          nodeId, allResults.size(), successCount, errorCount, executionTime);
+      log.info(
+          "Completed execution on node: {} - {} results, {} successes, {} errors in {}ms",
+          nodeId,
+          allResults.size(),
+          successCount,
+          errorCount,
+          executionTime);
 
       // Return results to coordinator
-      ExecuteDistributedTaskResponse response = ExecuteDistributedTaskResponse.success(
-          nodeId, allResults, executionStats);
+      ExecuteDistributedTaskResponse response =
+          ExecuteDistributedTaskResponse.success(nodeId, allResults, executionStats);
       listener.onResponse(response);
 
     } catch (Exception e) {
       log.error("Critical error executing distributed tasks on node: {}", nodeId, e);
-      ExecuteDistributedTaskResponse errorResponse = ExecuteDistributedTaskResponse.failure(
-          nodeId, "Critical execution error: " + e.getMessage());
+      ExecuteDistributedTaskResponse errorResponse =
+          ExecuteDistributedTaskResponse.failure(
+              nodeId, "Critical execution error: " + e.getMessage());
       listener.onResponse(errorResponse);
     }
   }
@@ -144,33 +154,36 @@ public class TransportExecuteDistributedTaskAction
 
     try {
       // Create execution context for this node
-      TaskOperator.TaskContext context = new TaskOperator.TaskContext(
-          clusterService.localNode().getId(),
-          null, // Storage context will be set by actual operators
-          30000L, // 30 second timeout for Phase 1
-          100 * 1024 * 1024L, // 100MB memory limit per task
-          Map.of()
-      );
+      TaskOperator.TaskContext context =
+          new TaskOperator.TaskContext(
+              clusterService.localNode().getId(),
+              null, // Storage context will be set by actual operators
+              30000L, // 30 second timeout for Phase 1
+              100 * 1024 * 1024L, // 100MB memory limit per task
+              Map.of());
 
       // Create task input (simplified for Phase 1)
-      TaskOperator.TaskInput input = new TaskOperator.TaskInput(
-          null, // Input data iterator - will be populated by actual operators
-          Map.of(), // Filter conditions
-          Map.of(), // Projections
-          Map.of(), // Grouping keys
-          Map.of(), // Aggregate functions
-          Map.of(), // Sort criteria
-          null, // Limit
-          inputData != null ? Map.of("inputData", inputData) : Map.of()
-      );
+      TaskOperator.TaskInput input =
+          new TaskOperator.TaskInput(
+              null, // Input data iterator - will be populated by actual operators
+              Map.of(), // Filter conditions
+              Map.of(), // Projections
+              Map.of(), // Grouping keys
+              Map.of(), // Aggregate functions
+              Map.of(), // Sort criteria
+              null, // Limit
+              inputData != null ? Map.of("inputData", inputData) : Map.of());
 
       // Execute the operator
-      log.debug("Executing operator: {} for work unit: {}",
-          operator.getOperatorType(), workUnit.getWorkUnitId());
+      log.debug(
+          "Executing operator: {} for work unit: {}",
+          operator.getOperatorType(),
+          workUnit.getWorkUnitId());
 
       TaskOperator.TaskResult result = operator.execute(context, input);
 
-      log.debug("Operator execution completed for work unit: {} - {} records, {} bytes",
+      log.debug(
+          "Operator execution completed for work unit: {} - {} records, {} bytes",
           workUnit.getWorkUnitId(),
           result != null ? result.getRecordCount() : 0,
           result != null ? result.getDataSize() : 0);

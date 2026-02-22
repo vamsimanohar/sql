@@ -19,20 +19,19 @@ import org.opensearch.sql.planner.distributed.DataPartition;
 /**
  * OpenSearch-specific implementation of partition discovery for distributed queries.
  *
- * <p>Discovers data partitions (shards) within OpenSearch indexes, providing
- * information needed for data locality optimization in distributed execution.
+ * <p>Discovers data partitions (shards) within OpenSearch indexes, providing information needed for
+ * data locality optimization in distributed execution.
  *
  * <p><strong>Partition Information:</strong>
+ *
  * <ul>
- *   <li>Shard ID and index name for Lucene access</li>
- *   <li>Node assignment for data locality</li>
- *   <li>Estimated shard size for scheduling optimization</li>
+ *   <li>Shard ID and index name for Lucene access
+ *   <li>Node assignment for data locality
+ *   <li>Estimated shard size for scheduling optimization
  * </ul>
  *
- * <p><strong>Phase 1 Implementation:</strong>
- * - Basic shard discovery from cluster routing table
- * - Simple size estimation (placeholder)
- * - Primary shard only (no replica handling)
+ * <p><strong>Phase 1 Implementation:</strong> - Basic shard discovery from cluster routing table -
+ * Simple size estimation (placeholder) - Primary shard only (no replica handling)
  */
 @Log4j2
 @RequiredArgsConstructor
@@ -79,10 +78,9 @@ public class OpenSearchPartitionDiscovery implements PartitionDiscovery {
     return partitions;
   }
 
-  /**
-   * Discovers shards for a specific index.
-   */
-  private List<DataPartition> discoverIndexShards(String indexName, IndexRoutingTable indexRoutingTable) {
+  /** Discovers shards for a specific index. */
+  private List<DataPartition> discoverIndexShards(
+      String indexName, IndexRoutingTable indexRoutingTable) {
     List<DataPartition> shards = new ArrayList<>();
 
     for (IndexShardRoutingTable shardRoutingTable : indexRoutingTable) {
@@ -94,12 +92,9 @@ public class OpenSearchPartitionDiscovery implements PartitionDiscovery {
         String nodeId = primaryShard.currentNodeId();
 
         // Create partition for this shard
-        DataPartition partition = DataPartition.createLucenePartition(
-            String.valueOf(shardId),
-            indexName,
-            nodeId,
-            estimateShardSize(indexName, shardId)
-        );
+        DataPartition partition =
+            DataPartition.createLucenePartition(
+                String.valueOf(shardId), indexName, nodeId, estimateShardSize(indexName, shardId));
 
         shards.add(partition);
         log.debug("Added partition for shard: {}/{} on node: {}", indexName, shardId, nodeId);
@@ -130,9 +125,7 @@ public class OpenSearchPartitionDiscovery implements PartitionDiscovery {
     return pattern;
   }
 
-  /**
-   * Checks if an index name matches the given pattern.
-   */
+  /** Checks if an index name matches the given pattern. */
   private boolean matchesPattern(String indexName, String pattern) {
     if (pattern.equals(indexName)) {
       return true; // Exact match

@@ -24,11 +24,11 @@ import org.opensearch.sql.planner.physical.PhysicalPlan;
 import org.opensearch.transport.TransportService;
 
 /**
- * Distributed execution engine that routes queries between legacy single-node execution
- * and distributed multi-node execution based on configuration and query characteristics.
+ * Distributed execution engine that routes queries between legacy single-node execution and
+ * distributed multi-node execution based on configuration and query characteristics.
  *
- * This engine serves as the entry point for distributed PPL query processing, with
- * fallback to the legacy OpenSearchExecutionEngine for compatibility.
+ * <p>This engine serves as the entry point for distributed PPL query processing, with fallback to
+ * the legacy OpenSearchExecutionEngine for compatibility.
  */
 @RequiredArgsConstructor
 public class DistributedExecutionEngine implements ExecutionEngine {
@@ -50,12 +50,11 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
   @Override
   public void execute(
-      PhysicalPlan plan,
-      ExecutionContext context,
-      ResponseListener<QueryResponse> listener) {
+      PhysicalPlan plan, ExecutionContext context, ResponseListener<QueryResponse> listener) {
 
     if (shouldUseDistributedExecution(plan, context)) {
-      logger.info("Using distributed execution for query plan: {}", plan.getClass().getSimpleName());
+      logger.info(
+          "Using distributed execution for query plan: {}", plan.getClass().getSimpleName());
       executeDistributed(plan, context, listener);
     } else {
       logger.debug("Using legacy execution for query plan: {}", plan.getClass().getSimpleName());
@@ -72,15 +71,15 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
   @Override
   public void execute(
-      RelNode plan,
-      CalcitePlanContext context,
-      ResponseListener<QueryResponse> listener) {
+      RelNode plan, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
 
     if (shouldUseDistributedExecution(plan, context)) {
-      logger.info("Using distributed execution for Calcite RelNode: {}", plan.getClass().getSimpleName());
+      logger.info(
+          "Using distributed execution for Calcite RelNode: {}", plan.getClass().getSimpleName());
       executeDistributedCalcite(plan, context, listener);
     } else {
-      logger.debug("Using legacy execution for Calcite RelNode: {}", plan.getClass().getSimpleName());
+      logger.debug(
+          "Using legacy execution for Calcite RelNode: {}", plan.getClass().getSimpleName());
       legacyEngine.execute(plan, context, listener);
     }
   }
@@ -139,7 +138,9 @@ public class DistributedExecutionEngine implements ExecutionEngine {
     // - Analyze query complexity and estimated data volume
     // - Determine if distributed execution would provide benefits
 
-    logger.debug("Calcite distributed execution enabled for testing - plan: {}", plan.getClass().getSimpleName());
+    logger.debug(
+        "Calcite distributed execution enabled for testing - plan: {}",
+        plan.getClass().getSimpleName());
     return true; // Enable for Phase 1 testing
   }
 
@@ -151,9 +152,7 @@ public class DistributedExecutionEngine implements ExecutionEngine {
    * @param listener Response listener for async execution
    */
   private void executeDistributed(
-      PhysicalPlan plan,
-      ExecutionContext context,
-      ResponseListener<QueryResponse> listener) {
+      PhysicalPlan plan, ExecutionContext context, ResponseListener<QueryResponse> listener) {
 
     try {
       // TODO: Phase 1 Implementation for PhysicalPlan
@@ -164,7 +163,8 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       // 5. Collect and merge results
 
       // For now, fallback to legacy engine with warning
-      logger.warn("Distributed PhysicalPlan execution not yet implemented, falling back to legacy engine");
+      logger.warn(
+          "Distributed PhysicalPlan execution not yet implemented, falling back to legacy engine");
       legacyEngine.execute(plan, context, listener);
 
     } catch (Exception e) {
@@ -182,9 +182,7 @@ public class DistributedExecutionEngine implements ExecutionEngine {
    * @param listener Response listener for async execution
    */
   private void executeDistributedCalcite(
-      RelNode plan,
-      CalcitePlanContext context,
-      ResponseListener<QueryResponse> listener) {
+      RelNode plan, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
 
     try {
       // Initialize distributed components if needed
@@ -204,9 +202,7 @@ public class DistributedExecutionEngine implements ExecutionEngine {
     }
   }
 
-  /**
-   * Lazily initializes distributed execution components.
-   */
+  /** Lazily initializes distributed execution components. */
   private void initializeDistributedComponents() {
     if (calciteDistributedPlanner == null) {
       synchronized (this) {

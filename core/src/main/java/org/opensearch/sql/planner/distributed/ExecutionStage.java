@@ -18,14 +18,16 @@ import lombok.NoArgsConstructor;
  * Represents a stage in distributed query execution containing related work units.
  *
  * <p>Execution stages provide the framework for coordinating distributed query processing:
+ *
  * <ul>
- *   <li>Group work units that can execute in parallel</li>
- *   <li>Define dependencies between stages for proper ordering</li>
- *   <li>Coordinate data exchange between stages</li>
- *   <li>Track stage completion and progress</li>
+ *   <li>Group work units that can execute in parallel
+ *   <li>Define dependencies between stages for proper ordering
+ *   <li>Coordinate data exchange between stages
+ *   <li>Track stage completion and progress
  * </ul>
  *
  * <p>Example multi-stage execution:
+ *
  * <pre>
  * Stage 1 (SCAN): Parallel shard scanning across data nodes
  *    └─ WorkUnit per shard: Filter and project data
@@ -66,9 +68,7 @@ public class ExecutionStage {
   /** Data exchange strategy for collecting results from this stage */
   private DataExchangeType dataExchange;
 
-  /**
-   * Enumeration of execution stage types in distributed processing.
-   */
+  /** Enumeration of execution stage types in distributed processing. */
   public enum StageType {
     /** Initial stage: Direct data scanning from storage */
     SCAN,
@@ -80,9 +80,7 @@ public class ExecutionStage {
     FINALIZE
   }
 
-  /**
-   * Enumeration of stage execution status.
-   */
+  /** Enumeration of stage execution status. */
   public enum StageStatus {
     /** Stage is waiting for dependencies to complete */
     WAITING,
@@ -103,9 +101,7 @@ public class ExecutionStage {
     CANCELLED
   }
 
-  /**
-   * Enumeration of data exchange strategies between stages.
-   */
+  /** Enumeration of data exchange strategies between stages. */
   public enum DataExchangeType {
     /** No data exchange - results remain on local nodes */
     NONE,
@@ -239,27 +235,21 @@ public class ExecutionStage {
         && (dependencyStages == null || completedStages.containsAll(dependencyStages));
   }
 
-  /**
-   * Marks this stage as ready for execution.
-   */
+  /** Marks this stage as ready for execution. */
   public void markReady() {
     if (status == StageStatus.WAITING) {
       status = StageStatus.READY;
     }
   }
 
-  /**
-   * Marks this stage as running.
-   */
+  /** Marks this stage as running. */
   public void markRunning() {
     if (status == StageStatus.READY) {
       status = StageStatus.RUNNING;
     }
   }
 
-  /**
-   * Marks this stage as completed.
-   */
+  /** Marks this stage as completed. */
   public void markCompleted() {
     if (status == StageStatus.RUNNING) {
       status = StageStatus.COMPLETED;
@@ -290,10 +280,11 @@ public class ExecutionStage {
       return 0;
     }
     return workUnits.stream()
-        .mapToLong(wu -> {
-          DataPartition partition = wu.getDataPartition();
-          return partition != null ? partition.getEstimatedSizeBytes() : 0;
-        })
+        .mapToLong(
+            wu -> {
+              DataPartition partition = wu.getDataPartition();
+              return partition != null ? partition.getEstimatedSizeBytes() : 0;
+            })
         .sum();
   }
 
@@ -308,9 +299,10 @@ public class ExecutionStage {
       return status == StageStatus.COMPLETED ? 1.0 : 0.0;
     }
 
-    long completedCount = workUnits.stream()
-        .mapToLong(wu -> completedWorkUnits.contains(wu.getWorkUnitId()) ? 1 : 0)
-        .sum();
+    long completedCount =
+        workUnits.stream()
+            .mapToLong(wu -> completedWorkUnits.contains(wu.getWorkUnitId()) ? 1 : 0)
+            .sum();
 
     return (double) completedCount / workUnits.size();
   }

@@ -13,17 +13,18 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 /**
- * Represents a unit of parallelizable work that can be distributed across cluster nodes.
- * WorkUnits are the fundamental building blocks of distributed query execution.
+ * Represents a unit of parallelizable work that can be distributed across cluster nodes. WorkUnits
+ * are the fundamental building blocks of distributed query execution.
  *
  * <p>Each WorkUnit contains:
+ *
  * <ul>
- *   <li>Unique identifier for tracking and coordination</li>
- *   <li>Work type indicating the operation (SCAN, PROCESS, FINALIZE)</li>
- *   <li>Data partition information specifying what data to process</li>
- *   <li>Task operator defining how to process the data</li>
- *   <li>Dependencies on other work units for ordering</li>
- *   <li>Target node assignment for data locality optimization</li>
+ *   <li>Unique identifier for tracking and coordination
+ *   <li>Work type indicating the operation (SCAN, PROCESS, FINALIZE)
+ *   <li>Data partition information specifying what data to process
+ *   <li>Task operator defining how to process the data
+ *   <li>Dependencies on other work units for ordering
+ *   <li>Target node assignment for data locality optimization
  * </ul>
  */
 @Data
@@ -33,8 +34,7 @@ import lombok.NoArgsConstructor;
 public class WorkUnit {
 
   /** Unique identifier for this work unit */
-  @EqualsAndHashCode.Include
-  private String workUnitId;
+  @EqualsAndHashCode.Include private String workUnitId;
 
   /** Type of work this unit performs */
   private WorkUnitType type;
@@ -54,25 +54,23 @@ public class WorkUnit {
   /** Additional properties for work unit execution */
   private Map<String, Object> properties;
 
-  /**
-   * Enumeration of work unit types in distributed execution.
-   */
+  /** Enumeration of work unit types in distributed execution. */
   public enum WorkUnitType {
     /**
-     * Stage 1: Direct data scanning from storage (Lucene shards, Parquet files, etc.)
-     * Assigned to nodes containing the target data for optimal locality.
+     * Stage 1: Direct data scanning from storage (Lucene shards, Parquet files, etc.) Assigned to
+     * nodes containing the target data for optimal locality.
      */
     SCAN,
 
     /**
-     * Stage 2+: Intermediate processing operations (aggregation, filtering, joining)
-     * Can be distributed across any available nodes in the cluster.
+     * Stage 2+: Intermediate processing operations (aggregation, filtering, joining) Can be
+     * distributed across any available nodes in the cluster.
      */
     PROCESS,
 
     /**
-     * Final stage: Global operations requiring all intermediate results
-     * Typically executed on the coordinator node for result collection.
+     * Final stage: Global operations requiring all intermediate results Typically executed on the
+     * coordinator node for result collection.
      */
     FINALIZE
   }
@@ -110,9 +108,7 @@ public class WorkUnit {
    * @return Configured process work unit
    */
   public static WorkUnit createProcessUnit(
-      String workUnitId,
-      TaskOperator taskOperator,
-      List<String> dependencies) {
+      String workUnitId, TaskOperator taskOperator, List<String> dependencies) {
     return new WorkUnit(
         workUnitId,
         WorkUnitType.PROCESS,
@@ -132,9 +128,7 @@ public class WorkUnit {
    * @return Configured finalize work unit
    */
   public static WorkUnit createFinalizeUnit(
-      String workUnitId,
-      TaskOperator taskOperator,
-      List<String> dependencies) {
+      String workUnitId, TaskOperator taskOperator, List<String> dependencies) {
     return new WorkUnit(
         workUnitId,
         WorkUnitType.FINALIZE,
@@ -156,8 +150,8 @@ public class WorkUnit {
   }
 
   /**
-   * Returns whether this work unit requires specific node assignment.
-   * SCAN units typically require specific nodes for data locality.
+   * Returns whether this work unit requires specific node assignment. SCAN units typically require
+   * specific nodes for data locality.
    *
    * @return true if node assignment is required, false otherwise
    */

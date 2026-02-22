@@ -23,16 +23,18 @@ import org.opensearch.sql.planner.SerializablePlan;
 /**
  * Represents a complete distributed execution plan consisting of multiple stages.
  *
- * <p>A distributed physical plan orchestrates the execution of a PPL query across
- * multiple nodes in the OpenSearch cluster. It provides:
+ * <p>A distributed physical plan orchestrates the execution of a PPL query across multiple nodes in
+ * the OpenSearch cluster. It provides:
+ *
  * <ul>
- *   <li>Multi-stage execution coordination</li>
- *   <li>Data locality optimization</li>
- *   <li>Fault tolerance and progress tracking</li>
- *   <li>Resource management across nodes</li>
+ *   <li>Multi-stage execution coordination
+ *   <li>Data locality optimization
+ *   <li>Fault tolerance and progress tracking
+ *   <li>Resource management across nodes
  * </ul>
  *
  * <p>Example execution flow:
+ *
  * <pre>
  * DistributedPhysicalPlan:
  *   Stage 1 (SCAN): [WorkUnit-Shard1@Node1, WorkUnit-Shard2@Node2, ...]
@@ -68,9 +70,7 @@ public class DistributedPhysicalPlan implements SerializablePlan {
   /** Current execution status of the plan */
   private PlanStatus status;
 
-  /**
-   * Enumeration of distributed plan execution status.
-   */
+  /** Enumeration of distributed plan execution status. */
   public enum PlanStatus {
     /** Plan is created but not yet started */
     CREATED,
@@ -99,16 +99,22 @@ public class DistributedPhysicalPlan implements SerializablePlan {
   public static DistributedPhysicalPlan create(
       String planId, List<ExecutionStage> stages, Schema outputSchema) {
 
-    double totalCost = stages.stream()
-        .mapToDouble(stage -> stage.getWorkUnits().stream()
-            .mapToDouble(wu -> wu.getTaskOperator().estimateCost(
-                wu.getDataPartition() != null ? wu.getDataPartition().getEstimatedSizeBytes() : 0))
-            .sum())
-        .sum();
+    double totalCost =
+        stages.stream()
+            .mapToDouble(
+                stage ->
+                    stage.getWorkUnits().stream()
+                        .mapToDouble(
+                            wu ->
+                                wu.getTaskOperator()
+                                    .estimateCost(
+                                        wu.getDataPartition() != null
+                                            ? wu.getDataPartition().getEstimatedSizeBytes()
+                                            : 0))
+                        .sum())
+            .sum();
 
-    long totalMemory = stages.stream()
-        .mapToLong(ExecutionStage::getEstimatedDataSize)
-        .sum();
+    long totalMemory = stages.stream().mapToLong(ExecutionStage::getEstimatedDataSize).sum();
 
     return new DistributedPhysicalPlan(
         planId,
@@ -225,15 +231,17 @@ public class DistributedPhysicalPlan implements SerializablePlan {
       return status == PlanStatus.COMPLETED ? 1.0 : 0.0;
     }
 
-    double totalProgress = executionStages.stream()
-        .mapToDouble(stage -> {
-          if (completedStages.contains(stage.getStageId())) {
-            return 1.0;
-          } else {
-            return stage.getProgress(completedWorkUnits);
-          }
-        })
-        .sum();
+    double totalProgress =
+        executionStages.stream()
+            .mapToDouble(
+                stage -> {
+                  if (completedStages.contains(stage.getStageId())) {
+                    return 1.0;
+                  } else {
+                    return stage.getProgress(completedWorkUnits);
+                  }
+                })
+            .sum();
 
     return totalProgress / executionStages.size();
   }
@@ -249,22 +257,17 @@ public class DistributedPhysicalPlan implements SerializablePlan {
       return true;
     }
 
-    return executionStages.stream()
-        .allMatch(stage -> completedStages.contains(stage.getStageId()));
+    return executionStages.stream().allMatch(stage -> completedStages.contains(stage.getStageId()));
   }
 
-  /**
-   * Marks the plan as executing.
-   */
+  /** Marks the plan as executing. */
   public void markExecuting() {
     if (status == PlanStatus.CREATED) {
       status = PlanStatus.EXECUTING;
     }
   }
 
-  /**
-   * Marks the plan as completed.
-   */
+  /** Marks the plan as completed. */
   public void markCompleted() {
     if (status == PlanStatus.EXECUTING) {
       status = PlanStatus.COMPLETED;
@@ -311,9 +314,8 @@ public class DistributedPhysicalPlan implements SerializablePlan {
     }
 
     // Check for duplicate stage IDs
-    Set<String> stageIds = executionStages.stream()
-        .map(ExecutionStage::getStageId)
-        .collect(Collectors.toSet());
+    Set<String> stageIds =
+        executionStages.stream().map(ExecutionStage::getStageId).collect(Collectors.toSet());
 
     if (stageIds.size() != executionStages.size()) {
       errors.add("Plan contains duplicate stage IDs");
@@ -324,7 +326,8 @@ public class DistributedPhysicalPlan implements SerializablePlan {
       if (stage.getDependencyStages() != null) {
         for (String depStageId : stage.getDependencyStages()) {
           if (!stageIds.contains(depStageId)) {
-            errors.add("Stage " + stage.getStageId() + " depends on non-existent stage: " + depStageId);
+            errors.add(
+                "Stage " + stage.getStageId() + " depends on non-existent stage: " + depStageId);
           }
         }
       }
@@ -337,18 +340,24 @@ public class DistributedPhysicalPlan implements SerializablePlan {
   public String toString() {
     StringBuilder sb = new StringBuilder();
     sb.append("DistributedPhysicalPlan{")
-      .append("planId='").append(planId).append('\'')
-      .append(", stages=").append(executionStages != null ? executionStages.size() : 0)
-      .append(", status=").append(status)
-      .append(", estimatedCost=").append(estimatedCost)
-      .append(", estimatedMemoryMB=").append(estimatedMemoryBytes / (1024 * 1024))
-      .append('}');
+        .append("planId='")
+        .append(planId)
+        .append('\'')
+        .append(", stages=")
+        .append(executionStages != null ? executionStages.size() : 0)
+        .append(", status=")
+        .append(status)
+        .append(", estimatedCost=")
+        .append(estimatedCost)
+        .append(", estimatedMemoryMB=")
+        .append(estimatedMemoryBytes / (1024 * 1024))
+        .append('}');
     return sb.toString();
   }
 
   /**
-   * Implementation of Externalizable interface for serialization support.
-   * Required for cursor-based pagination.
+   * Implementation of Externalizable interface for serialization support. Required for cursor-based
+   * pagination.
    */
   @Override
   public void writeExternal(ObjectOutput out) throws IOException {

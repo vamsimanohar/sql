@@ -718,8 +718,8 @@ public class OpenSearchSettings extends Settings {
   }
 
   /**
-   * Returns whether distributed PPL execution is enabled.
-   * Defaults to false for safety - distributed execution must be explicitly enabled.
+   * Returns whether distributed PPL execution is enabled. Defaults to false for safety -
+   * distributed execution must be explicitly enabled.
    *
    * @return true if distributed execution is enabled, false otherwise
    */
