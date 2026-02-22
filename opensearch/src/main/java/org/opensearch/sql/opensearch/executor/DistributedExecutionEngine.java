@@ -9,15 +9,19 @@ import lombok.RequiredArgsConstructor;
 import org.apache.calcite.rel.RelNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.executor.ExecutionContext;
 import org.opensearch.sql.executor.ExecutionEngine;
+import org.opensearch.sql.opensearch.executor.distributed.DistributedTaskScheduler;
+import org.opensearch.sql.opensearch.executor.distributed.OpenSearchPartitionDiscovery;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.planner.distributed.CalciteDistributedPhysicalPlanner;
 import org.opensearch.sql.planner.distributed.DistributedPhysicalPlan;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
+import org.opensearch.transport.TransportService;
 
 /**
  * Distributed execution engine that routes queries between legacy single-node execution
@@ -32,7 +36,12 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
   private final OpenSearchExecutionEngine legacyEngine;
   private final OpenSearchSettings settings;
-  private final CalciteDistributedPhysicalPlanner calciteDistributedPlanner;
+  private final TransportService transportService;
+  private final ClusterService clusterService;
+
+  // Lazy-initialized components for distributed execution
+  private volatile CalciteDistributedPhysicalPlanner calciteDistributedPlanner;
+  private volatile DistributedTaskScheduler distributedTaskScheduler;
 
   @Override
   public void execute(PhysicalPlan plan, ResponseListener<QueryResponse> listener) {
@@ -178,23 +187,43 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       ResponseListener<QueryResponse> listener) {
 
     try {
+      // Initialize distributed components if needed
+      initializeDistributedComponents();
+
       // Phase 1: Convert RelNode to DistributedPhysicalPlan
       DistributedPhysicalPlan distributedPlan = calciteDistributedPlanner.plan(plan, context);
+      logger.info("Created distributed plan: {}", distributedPlan);
 
-      // TODO: Phase 1 Implementation
-      // 1. Schedule WorkUnits across cluster nodes via DistributedTaskScheduler
-      // 2. Coordinate stage-by-stage execution
-      // 3. Collect and merge results from distributed tasks
-      // 4. Return results via ResponseListener
-
-      // For now, log the successful planning but fallback to legacy engine
-      logger.warn("Calcite distributed plan created successfully: {}, but execution not yet implemented. Falling back to legacy engine", distributedPlan);
-      legacyEngine.execute(plan, context, listener);
+      // Phase 1: Execute distributed plan using DistributedTaskScheduler
+      distributedTaskScheduler.executeQuery(distributedPlan, listener);
 
     } catch (Exception e) {
       logger.error("Error in distributed Calcite execution, falling back to legacy engine", e);
       // Always fallback to legacy engine on any error
       legacyEngine.execute(plan, context, listener);
+    }
+  }
+
+  /**
+   * Lazily initializes distributed execution components.
+   */
+  private void initializeDistributedComponents() {
+    if (calciteDistributedPlanner == null) {
+      synchronized (this) {
+        if (calciteDistributedPlanner == null) {
+          // Create partition discovery for OpenSearch shards
+          OpenSearchPartitionDiscovery partitionDiscovery =
+              new OpenSearchPartitionDiscovery(clusterService);
+
+          // Create distributed physical planner
+          calciteDistributedPlanner = new CalciteDistributedPhysicalPlanner(partitionDiscovery);
+
+          // Create distributed task scheduler
+          distributedTaskScheduler = new DistributedTaskScheduler(transportService, clusterService);
+
+          logger.info("Initialized distributed execution components");
+        }
+      }
     }
   }
 
