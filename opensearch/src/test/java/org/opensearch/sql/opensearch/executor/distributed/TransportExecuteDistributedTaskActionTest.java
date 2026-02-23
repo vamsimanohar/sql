@@ -22,18 +22,25 @@ import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.opensearch.action.search.SearchRequest;
+import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.search.SearchHit;
+import org.opensearch.search.SearchHits;
+import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.sql.planner.distributed.DataPartition;
 import org.opensearch.sql.planner.distributed.WorkUnit;
 import org.opensearch.tasks.Task;
 import org.opensearch.transport.TransportService;
+import org.opensearch.transport.client.Client;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -43,6 +50,7 @@ class TransportExecuteDistributedTaskActionTest {
   @Mock private TransportService transportService;
   @Mock private ClusterService clusterService;
   @Mock private ActionFilters actionFilters;
+  @Mock private Client client;
   @Mock private Task task;
   @Mock private ActionListener<ExecuteDistributedTaskResponse> actionListener;
 
@@ -51,7 +59,8 @@ class TransportExecuteDistributedTaskActionTest {
   @BeforeEach
   void setUp() {
     action =
-        new TransportExecuteDistributedTaskAction(transportService, actionFilters, clusterService);
+        new TransportExecuteDistributedTaskAction(
+            transportService, actionFilters, clusterService, client);
 
     // Setup cluster service mock
     DiscoveryNode localNode = mock(DiscoveryNode.class);
@@ -291,5 +300,137 @@ class TransportExecuteDistributedTaskActionTest {
 
     return new ExecuteDistributedTaskRequest(
         List.of(workUnit1, workUnit2, workUnit3), "multi-work-stage", null);
+  }
+
+  // --- Phase 1C Tests ---
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void should_execute_phase1c_search_request() {
+    // Given: Phase 1C request with SearchSourceBuilder
+    ExecuteDistributedTaskRequest request = createPhase1CRequest();
+    AtomicReference<ExecuteDistributedTaskResponse> responseRef = new AtomicReference<>();
+
+    doAnswer(
+            invocation -> {
+              ExecuteDistributedTaskResponse response = invocation.getArgument(0);
+              responseRef.set(response);
+              return null;
+            })
+        .when(actionListener)
+        .onResponse(any());
+
+    // Mock client.search() to return a successful SearchResponse
+    SearchResponse mockSearchResponse = mock(SearchResponse.class);
+    SearchHits mockHits = mock(SearchHits.class);
+    when(mockHits.getHits()).thenReturn(new SearchHit[0]);
+    when(mockSearchResponse.getHits()).thenReturn(mockHits);
+    when(mockSearchResponse.getAggregations()).thenReturn(null);
+
+    doAnswer(
+            invocation -> {
+              ActionListener<SearchResponse> searchListener = invocation.getArgument(1);
+              searchListener.onResponse(mockSearchResponse);
+              return null;
+            })
+        .when(client)
+        .search(any(SearchRequest.class), any(ActionListener.class));
+
+    // When
+    action.doExecute(task, request, actionListener);
+
+    // Then
+    verify(actionListener).onResponse(any(ExecuteDistributedTaskResponse.class));
+    ExecuteDistributedTaskResponse response = responseRef.get();
+    assertNotNull(response);
+    assertTrue(response.isSuccessful());
+    assertNotNull(response.getSearchResponse());
+    assertEquals("test-node-1", response.getNodeId());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void should_build_correct_shard_preference_for_phase1c() {
+    // Given: Phase 1C request with multiple shard IDs
+    ExecuteDistributedTaskRequest request = new ExecuteDistributedTaskRequest();
+    request.setSearchSourceBuilder(new SearchSourceBuilder());
+    request.setIndexName("test-index");
+    request.setShardIds(List.of(0, 2, 4));
+    request.setStageId("phase1c-scan");
+
+    SearchResponse mockSearchResponse = mock(SearchResponse.class);
+    SearchHits mockHits = mock(SearchHits.class);
+    when(mockHits.getHits()).thenReturn(new SearchHit[0]);
+    when(mockSearchResponse.getHits()).thenReturn(mockHits);
+    when(mockSearchResponse.getAggregations()).thenReturn(null);
+
+    ArgumentCaptor<SearchRequest> searchRequestCaptor =
+        ArgumentCaptor.forClass(SearchRequest.class);
+
+    doAnswer(
+            invocation -> {
+              ActionListener<SearchResponse> searchListener = invocation.getArgument(1);
+              searchListener.onResponse(mockSearchResponse);
+              return null;
+            })
+        .when(client)
+        .search(searchRequestCaptor.capture(), any(ActionListener.class));
+
+    doAnswer(invocation -> null).when(actionListener).onResponse(any());
+
+    // When
+    action.doExecute(task, request, actionListener);
+
+    // Then: Verify shard preference is correctly constructed
+    SearchRequest capturedRequest = searchRequestCaptor.getValue();
+    assertEquals("_shards:0,2,4", capturedRequest.preference());
+    assertEquals("test-index", capturedRequest.indices()[0]);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void should_handle_phase1c_search_failure() {
+    // Given: Phase 1C request
+    ExecuteDistributedTaskRequest request = createPhase1CRequest();
+    AtomicReference<ExecuteDistributedTaskResponse> responseRef = new AtomicReference<>();
+
+    doAnswer(
+            invocation -> {
+              ExecuteDistributedTaskResponse response = invocation.getArgument(0);
+              responseRef.set(response);
+              return null;
+            })
+        .when(actionListener)
+        .onResponse(any());
+
+    // Mock client.search() to fail
+    doAnswer(
+            invocation -> {
+              ActionListener<SearchResponse> searchListener = invocation.getArgument(1);
+              searchListener.onFailure(new RuntimeException("Search failed"));
+              return null;
+            })
+        .when(client)
+        .search(any(SearchRequest.class), any(ActionListener.class));
+
+    // When
+    action.doExecute(task, request, actionListener);
+
+    // Then: Should return failure response (not throw)
+    verify(actionListener).onResponse(any(ExecuteDistributedTaskResponse.class));
+    ExecuteDistributedTaskResponse response = responseRef.get();
+    assertNotNull(response);
+    assertTrue(!response.isSuccessful());
+    assertNotNull(response.getErrorMessage());
+    assertTrue(response.getErrorMessage().contains("Search failed"));
+  }
+
+  private ExecuteDistributedTaskRequest createPhase1CRequest() {
+    ExecuteDistributedTaskRequest request = new ExecuteDistributedTaskRequest();
+    request.setSearchSourceBuilder(new SearchSourceBuilder());
+    request.setIndexName("test-index");
+    request.setShardIds(List.of(0, 1));
+    request.setStageId("phase1c-scan");
+    return request;
   }
 }

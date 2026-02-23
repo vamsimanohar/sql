@@ -109,6 +109,15 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
     return new ExecuteDistributedTaskResponse(List.of(), Map.of(), nodeId, false, errorMessage);
   }
 
+  /** Creates a successful response containing a SearchResponse (Phase 1C). */
+  public static ExecuteDistributedTaskResponse successWithSearch(
+      String nodeId, SearchResponse searchResponse) {
+    ExecuteDistributedTaskResponse resp =
+        new ExecuteDistributedTaskResponse(List.of(), Map.of(), nodeId, true, null);
+    resp.setSearchResponse(searchResponse);
+    return resp;
+  }
+
   /** Gets the number of results returned. */
   public int getResultCount() {
     return results != null ? results.size() : 0;

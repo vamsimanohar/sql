@@ -9,7 +9,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.extern.log4j.Log4j2;
+import org.opensearch.action.search.SearchRequest;
+import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.cluster.service.ClusterService;
@@ -19,6 +22,7 @@ import org.opensearch.sql.planner.distributed.TaskOperator;
 import org.opensearch.sql.planner.distributed.WorkUnit;
 import org.opensearch.tasks.Task;
 import org.opensearch.transport.TransportService;
+import org.opensearch.transport.client.Client;
 
 /**
  * Transport action handler for executing distributed query tasks on data nodes.
@@ -46,18 +50,21 @@ public class TransportExecuteDistributedTaskAction
   public static final String NAME = "cluster:admin/opensearch/sql/distributed/execute";
 
   private final ClusterService clusterService;
+  private final Client client;
 
   @Inject
   public TransportExecuteDistributedTaskAction(
       TransportService transportService,
       ActionFilters actionFilters,
-      ClusterService clusterService) {
+      ClusterService clusterService,
+      Client client) {
     super(
         ExecuteDistributedTaskAction.NAME,
         transportService,
         actionFilters,
         ExecuteDistributedTaskRequest::new);
     this.clusterService = clusterService;
+    this.client = client;
   }
 
   @Override
@@ -67,13 +74,21 @@ public class TransportExecuteDistributedTaskAction
       ActionListener<ExecuteDistributedTaskResponse> listener) {
 
     String nodeId = clusterService.localNode().getId();
-    log.info(
-        "Executing {} work units on node: {} for stage: {}",
-        request.getWorkUnitCount(),
-        nodeId,
-        request.getStageId());
 
     try {
+      // Phase 1C: SearchSourceBuilder-based execution (transport from coordinator)
+      if (request.getSearchSourceBuilder() != null) {
+        executeSearchRequest(request, nodeId, listener);
+        return;
+      }
+
+      // Legacy path: WorkUnit-based execution
+      log.info(
+          "Executing {} work units on node: {} for stage: {}",
+          request.getWorkUnitCount(),
+          nodeId,
+          request.getStageId());
+
       // Validate request
       if (!request.isValid()) {
         String error = "Invalid distributed task request: " + request;
@@ -138,6 +153,57 @@ public class TransportExecuteDistributedTaskAction
               nodeId, "Critical execution error: " + e.getMessage());
       listener.onResponse(errorResponse);
     }
+  }
+
+  /**
+   * Phase 1C: Executes a search request locally on this data node. The coordinator sends the
+   * SearchSourceBuilder and shard IDs via transport; this node executes client.search() locally for
+   * the assigned shards and returns the SearchResponse.
+   *
+   * @param request The request containing SearchSourceBuilder, index name, and shard IDs
+   * @param nodeId The local node ID
+   * @param listener Response listener for async execution
+   */
+  private void executeSearchRequest(
+      ExecuteDistributedTaskRequest request,
+      String nodeId,
+      ActionListener<ExecuteDistributedTaskResponse> listener) {
+
+    String shardPreference =
+        request.getShardIds().stream().map(String::valueOf).collect(Collectors.joining(","));
+
+    log.info(
+        "[Phase 1C] Executing search on node: {} for index: {}, shards: [{}]",
+        nodeId,
+        request.getIndexName(),
+        shardPreference);
+
+    SearchRequest searchRequest = new SearchRequest(request.getIndexName());
+    searchRequest.source(request.getSearchSourceBuilder());
+    searchRequest.preference("_shards:" + shardPreference);
+
+    client.search(
+        searchRequest,
+        new ActionListener<>() {
+          @Override
+          public void onResponse(SearchResponse searchResponse) {
+            log.info(
+                "[Phase 1C] Search completed on node: {} - {} hits, hasAggs={}",
+                nodeId,
+                searchResponse.getHits().getHits().length,
+                searchResponse.getAggregations() != null);
+            listener.onResponse(
+                ExecuteDistributedTaskResponse.successWithSearch(nodeId, searchResponse));
+          }
+
+          @Override
+          public void onFailure(Exception e) {
+            log.error("[Phase 1C] Search failed on node: {}", nodeId, e);
+            listener.onResponse(
+                ExecuteDistributedTaskResponse.failure(
+                    nodeId, "Phase 1C search failed: " + e.getMessage()));
+          }
+        });
   }
 
   /**

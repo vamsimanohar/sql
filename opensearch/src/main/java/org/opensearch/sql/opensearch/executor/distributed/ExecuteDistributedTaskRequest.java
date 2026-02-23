@@ -112,11 +112,17 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
   }
 
   /**
-   * Validates the request before execution.
+   * Validates the request before execution. Supports both Phase 1C (SearchSourceBuilder-based) and
+   * legacy (WorkUnit-based) request formats.
    *
    * @return true if request is valid for execution
    */
   public boolean isValid() {
+    // Phase 1C: SSB-based request
+    if (searchSourceBuilder != null) {
+      return indexName != null && !indexName.isEmpty() && shardIds != null && !shardIds.isEmpty();
+    }
+    // Legacy: WorkUnit-based request
     return stageId != null && !stageId.isEmpty() && workUnits != null;
   }
 
@@ -127,6 +133,23 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
 
   @Override
   public ActionRequestValidationException validate() {
+    // Phase 1C: SSB-based request requires index + shards
+    if (searchSourceBuilder != null) {
+      ActionRequestValidationException validationException = null;
+      if (indexName == null || indexName.trim().isEmpty()) {
+        validationException = new ActionRequestValidationException();
+        validationException.addValidationError("Index name cannot be null or empty");
+      }
+      if (shardIds == null || shardIds.isEmpty()) {
+        if (validationException == null) {
+          validationException = new ActionRequestValidationException();
+        }
+        validationException.addValidationError("Shard IDs cannot be null or empty");
+      }
+      return validationException;
+    }
+
+    // Legacy: WorkUnit-based validation
     ActionRequestValidationException validationException = null;
 
     if (stageId == null || stageId.trim().isEmpty()) {
