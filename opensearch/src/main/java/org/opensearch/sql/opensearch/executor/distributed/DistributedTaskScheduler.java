@@ -620,13 +620,28 @@ public class DistributedTaskScheduler {
       }
     } else {
       // Non-aggregation merge: collect all SearchHits
+      List<RelDataTypeField> schemaFields = rowType.getFieldList();
       for (SearchResponse response : shardResponses) {
         OpenSearchResponse osResponse =
             new OpenSearchResponse(response, exprValueFactory, includes, false);
         Iterator<ExprValue> hitIterator = osResponse.iterator();
         while (hitIterator.hasNext()
             && (querySizeLimit == null || values.size() < querySizeLimit)) {
-          values.add(hitIterator.next());
+          ExprValue hit = hitIterator.next();
+          // Reorder tuple fields to match schema column order from RelDataType
+          Map<String, ExprValue> unordered = hit.tupleValue();
+          Map<String, ExprValue> ordered = new LinkedHashMap<>();
+          for (RelDataTypeField field : schemaFields) {
+            ExprValue val = unordered.get(field.getName());
+            if (val != null) {
+              ordered.put(field.getName(), val);
+            }
+          }
+          // Include any remaining fields not in schema (safety fallback)
+          for (Map.Entry<String, ExprValue> kv : unordered.entrySet()) {
+            ordered.putIfAbsent(kv.getKey(), kv.getValue());
+          }
+          values.add(ExprTupleValue.fromExprValueMap(ordered));
         }
 
         if (querySizeLimit != null && values.size() >= querySizeLimit) {

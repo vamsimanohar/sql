@@ -8,6 +8,10 @@ package org.opensearch.sql.opensearch.executor;
 import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Project;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexOver;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -286,10 +290,16 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       return false;
     }
 
-    // Check for unsupported operations: Join queries require shuffle exchange (Phase 4)
-    if (containsJoin(plan)) {
+    // Check for unsupported operations that the SSB-based distributed engine can't handle.
+    // The distributed engine extracts a SearchSourceBuilder from the Calcite-optimized scan
+    // and sends it to data nodes via transport. Operations NOT pushed into the SSB (joins,
+    // window functions, computed expressions) would be silently dropped, producing wrong results.
+    String unsupported = findUnsupportedOperation(plan);
+    if (unsupported != null) {
       logger.debug(
-          "Query contains join — routing to legacy engine (join distribution not yet supported)");
+          "Query contains unsupported operation for distributed execution: {} — routing to legacy"
+              + " engine",
+          unsupported);
       return false;
     }
 
@@ -298,17 +308,38 @@ public class DistributedExecutionEngine implements ExecutionEngine {
     return true;
   }
 
-  /** Checks if the RelNode tree contains a Join operator (unsupported for distributed). */
-  private boolean containsJoin(RelNode node) {
+  /**
+   * Walks the logical RelNode tree to find operations that the distributed engine cannot handle.
+   * Returns a description of the unsupported operation, or null if the plan is supported.
+   */
+  private String findUnsupportedOperation(RelNode node) {
+    // Join: requires shuffle exchange (Phase 4)
     if (node instanceof org.apache.calcite.rel.core.Join) {
-      return true;
+      return "JOIN (requires shuffle exchange)";
     }
-    for (RelNode input : node.getInputs()) {
-      if (containsJoin(input)) {
-        return true;
+
+    // Project with computed expressions or window functions:
+    // Simple field references are pushed to SSB fetchSource, but computed expressions
+    // (eval) and window functions (dedup via ROW_NUMBER) are NOT pushed down.
+    if (node instanceof Project project) {
+      for (RexNode expr : project.getProjects()) {
+        if (expr instanceof RexOver) {
+          return "window function (ROW_NUMBER/RANK in dedup)";
+        }
+        if (expr instanceof RexCall) {
+          return "computed expression (eval)";
+        }
       }
     }
-    return false;
+
+    // Recurse into children
+    for (RelNode input : node.getInputs()) {
+      String found = findUnsupportedOperation(input);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
   }
 
   /**
