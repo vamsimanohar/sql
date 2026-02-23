@@ -32,9 +32,9 @@ import org.opensearch.sql.calcite.CalcitePlanContext;
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
-class CalciteDistributedPhysicalPlannerTest {
+class DistributedQueryPlannerTest {
 
-  @Mock private CalciteDistributedPhysicalPlanner.PartitionDiscovery partitionDiscovery;
+  @Mock private DistributedQueryPlanner.PartitionDiscovery partitionDiscovery;
   @Mock private CalcitePlanContext planContext;
   @Mock private TableScan tableScan;
   @Mock private LogicalFilter filter;
@@ -42,11 +42,11 @@ class CalciteDistributedPhysicalPlannerTest {
   @Mock private LogicalAggregate aggregate;
   @Mock private LogicalSort sort;
 
-  private CalciteDistributedPhysicalPlanner planner;
+  private DistributedQueryPlanner planner;
 
   @BeforeEach
   void setUp() {
-    planner = new CalciteDistributedPhysicalPlanner(partitionDiscovery);
+    planner = new DistributedQueryPlanner(partitionDiscovery);
 
     // Setup mock partition discovery
     DataPartition mockPartition =
@@ -160,7 +160,7 @@ class CalciteDistributedPhysicalPlannerTest {
 
     // Then
     assertNotNull(plan.getPlanId());
-    assertTrue(plan.getPlanId().startsWith("calcite-distributed-plan-"));
+    assertTrue(plan.getPlanId().startsWith("distributed-plan-"));
     assertEquals(DistributedPhysicalPlan.PlanStatus.CREATED, plan.getStatus());
   }
 

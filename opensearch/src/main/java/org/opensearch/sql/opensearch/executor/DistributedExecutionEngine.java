@@ -20,8 +20,8 @@ import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.opensearch.executor.distributed.DistributedTaskScheduler;
 import org.opensearch.sql.opensearch.executor.distributed.OpenSearchPartitionDiscovery;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
-import org.opensearch.sql.planner.distributed.CalciteDistributedPhysicalPlanner;
 import org.opensearch.sql.planner.distributed.DistributedPhysicalPlan;
+import org.opensearch.sql.planner.distributed.DistributedQueryPlanner;
 import org.opensearch.sql.planner.distributed.ExecutionStage;
 import org.opensearch.sql.planner.distributed.WorkUnit;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
@@ -40,7 +40,7 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
   private final OpenSearchExecutionEngine legacyEngine;
   private final OpenSearchSettings settings;
-  private final CalciteDistributedPhysicalPlanner calciteDistributedPlanner;
+  private final DistributedQueryPlanner distributedQueryPlanner;
   private final DistributedTaskScheduler distributedTaskScheduler;
 
   public DistributedExecutionEngine(
@@ -51,8 +51,8 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       Client client) {
     this.legacyEngine = legacyEngine;
     this.settings = settings;
-    this.calciteDistributedPlanner =
-        new CalciteDistributedPhysicalPlanner(new OpenSearchPartitionDiscovery(clusterService));
+    this.distributedQueryPlanner =
+        new DistributedQueryPlanner(new OpenSearchPartitionDiscovery(clusterService));
     this.distributedTaskScheduler =
         new DistributedTaskScheduler(transportService, clusterService, client);
     logger.info("Initialized DistributedExecutionEngine");
@@ -132,7 +132,7 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       String logical = RelOptUtil.toString(plan, level);
 
       // Create distributed plan (analyzes RelNode tree + discovers partitions, no execution)
-      DistributedPhysicalPlan distributedPlan = calciteDistributedPlanner.plan(plan, context);
+      DistributedPhysicalPlan distributedPlan = distributedQueryPlanner.plan(plan, context);
       String distributed = formatDistributedPlan(distributedPlan);
 
       listener.onResponse(
@@ -154,7 +154,7 @@ public class DistributedExecutionEngine implements ExecutionEngine {
     // Header
     sb.append("== Distributed Execution Plan ==\n");
     sb.append("Plan: ").append(plan.getPlanId()).append("\n");
-    sb.append("Mode: Phase 1B (per-shard search)\n");
+    sb.append("Mode: Phase 2 (distributed aggregation)\n");
     sb.append("Stages: ").append(stages.size()).append("\n");
 
     for (int i = 0; i < stages.size(); i++) {
@@ -172,6 +172,12 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
       // Stage header: [1] SCAN  (exchange: NONE, parallelism: 5)
       sb.append("[").append(i + 1).append("] ").append(stage.getStageType());
+      if (stage.getStageType() == ExecutionStage.StageType.PROCESS) {
+        sb.append(" (partial aggregation)");
+      } else if (stage.getStageType() == ExecutionStage.StageType.FINALIZE
+          && stages.stream().anyMatch(s -> s.getStageType() == ExecutionStage.StageType.PROCESS)) {
+        sb.append(" (merge aggregation via InternalAggregations.reduce)");
+      }
       sb.append("  (exchange: ").append(stage.getDataExchange());
       sb.append(", parallelism: ").append(stage.getEstimatedParallelism()).append(")\n");
 
@@ -334,7 +340,7 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
     try {
       // Phase 1: Convert RelNode to DistributedPhysicalPlan
-      DistributedPhysicalPlan distributedPlan = calciteDistributedPlanner.plan(plan, context);
+      DistributedPhysicalPlan distributedPlan = distributedQueryPlanner.plan(plan, context);
       logger.info("Created distributed plan: {}", distributedPlan);
 
       // Phase 1: Execute distributed plan using DistributedTaskScheduler

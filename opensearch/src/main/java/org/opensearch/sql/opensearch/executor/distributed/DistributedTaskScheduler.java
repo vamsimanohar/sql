@@ -137,17 +137,25 @@ public class DistributedTaskScheduler {
       // Mark plan as executing
       plan.markExecuting();
 
-      // Phase 1B: Per-shard search execution with Phase 1A fallback
+      // Phase 2: Transport-based parallel execution with Phase 1B/1A fallback
       if (plan.getRelNode() != null) {
         try {
           executePerShardSearch(plan, listener);
         } catch (Exception e) {
           log.warn(
-              "[Distributed Engine] Per-shard execution failed, falling back to local Calcite"
-                  + " for plan: {}",
+              "[Distributed Engine] Phase 2 transport failed, trying Phase 1B local for plan: {}",
               plan.getPlanId(),
               e);
-          executeLocalCalcite(plan, listener);
+          try {
+            executePerShardLocal(plan, listener);
+          } catch (Exception e2) {
+            log.warn(
+                "[Distributed Engine] Phase 1B local failed, falling back to Phase 1A Calcite"
+                    + " for plan: {}",
+                plan.getPlanId(),
+                e2);
+            executeLocalCalcite(plan, listener);
+          }
         }
         return;
       }
@@ -208,9 +216,12 @@ public class DistributedTaskScheduler {
   }
 
   /**
-   * Phase 1B: Executes query using per-shard OpenSearch search API calls. Calcite is used only for
-   * logical optimization (pushdown rules populate PushDownContext). After optimization, the
-   * SearchSourceBuilder is extracted and executed directly against individual shards.
+   * Phase 2: Executes query using transport-based parallel execution. Supports scan, filter,
+   * projection, and aggregation queries. The coordinator groups shards by their assigned data
+   * nodes, sends ExecuteDistributedTaskRequest (containing SearchSourceBuilder + shard IDs) to each
+   * node via transportService.sendRequest(), and each data node executes client.search() locally
+   * for its assigned shards. For aggregation queries, partial results are merged via
+   * InternalAggregations.reduce().
    *
    * @param plan The distributed plan containing the RelNode and CalcitePlanContext
    * @param listener Response listener for the query results
@@ -221,17 +232,214 @@ public class DistributedTaskScheduler {
     CalcitePlanContext context = (CalcitePlanContext) plan.getPlanContext();
 
     log.info(
-        "[Distributed Engine] Phase 1B - executing per-shard search for plan: {}",
+        "[Distributed Engine] Phase 2 - executing per-shard via transport for plan: {}",
         plan.getPlanId());
 
     PreparedStatement statement = null;
     try {
       // Step 1: Run Calcite optimization (VolcanoPlanner applies pushdown rules)
-      // This populates PushDownContext with filter/project/agg/sort/limit operations
-      // and stores the optimized scan node on ThreadLocal
       statement = OpenSearchRelRunners.run(context, relNode);
 
-      // Step 2: Read the optimized scan node from ThreadLocal (set in implement())
+      // Step 2: Read the optimized scan node from ThreadLocal
+      Object scanObj = CalcitePlanContext.optimizedScanNode.get();
+      CalcitePlanContext.optimizedScanNode.remove();
+
+      if (!(scanObj instanceof AbstractCalciteIndexScan scan)) {
+        // Scan node not available — query has post-aggregation operations (sort/limit)
+        // that Calcite handles internally. Fall back to Phase 1A using the already-running
+        // PreparedStatement instead of throwing (which would consume the connection).
+        log.info(
+            "[Distributed Engine] Phase 2 - scan node not available (likely sort/limit after agg),"
+                + " using Phase 1A inline for plan: {}",
+            plan.getPlanId());
+        ResultSet resultSet = statement.executeQuery();
+        QueryResponse queryResponse =
+            buildQueryResponse(resultSet, relNode.getRowType(), context.sysLimit.querySizeLimit());
+        statement.close();
+        plan.markCompleted();
+        listener.onResponse(queryResponse);
+        return;
+      }
+
+      // Step 3: Extract SearchSourceBuilder from PushDownContext
+      OpenSearchRequestBuilder requestBuilder = scan.getPushDownContext().createRequestBuilder();
+      SearchSourceBuilder sourceBuilder = requestBuilder.getSourceBuilder();
+      OpenSearchExprValueFactory exprValueFactory = requestBuilder.getExprValueFactory();
+      boolean isAggregation = sourceBuilder.size() == 0 && sourceBuilder.aggregations() != null;
+
+      org.opensearch.search.fetch.subphase.FetchSourceContext fetchSource =
+          sourceBuilder.fetchSource();
+      List<String> includes =
+          fetchSource != null ? Arrays.asList(fetchSource.includes()) : List.of();
+
+      // Step 4: Get shard partitions from the SCAN stage work units
+      List<WorkUnit> scanWorkUnits = getScanStageWorkUnits(plan);
+      String indexName = scanWorkUnits.getFirst().getDataPartition().getIndexName();
+
+      log.info(
+          "[Distributed Engine] Phase 2 - extracted SSB for index: {}, isAgg: {}, shards: {}",
+          indexName,
+          isAggregation,
+          scanWorkUnits.size());
+
+      // Step 5: Group work units by node for parallel transport execution
+      Map<String, List<WorkUnit>> workByNode = new HashMap<>();
+      for (WorkUnit wu : scanWorkUnits) {
+        String nodeId = wu.getDataPartition().getNodeId();
+        if (nodeId == null) {
+          nodeId = wu.getAssignedNodeId();
+        }
+        if (nodeId == null) {
+          throw new IllegalStateException(
+              "Work unit has no node assignment: " + wu.getWorkUnitId());
+        }
+        workByNode.computeIfAbsent(nodeId, k -> new ArrayList<>()).add(wu);
+      }
+
+      log.info("[Distributed Engine] Phase 2 - sending requests to {} nodes", workByNode.size());
+
+      // Step 6: Send parallel transport requests to each node
+      List<CompletableFuture<SearchResponse>> futures = new ArrayList<>();
+
+      for (Map.Entry<String, List<WorkUnit>> entry : workByNode.entrySet()) {
+        String nodeId = entry.getKey();
+        List<WorkUnit> nodeWorkUnits = entry.getValue();
+
+        // Collect shard IDs for this node
+        List<Integer> shardIds =
+            nodeWorkUnits.stream()
+                .map(wu -> Integer.parseInt(wu.getDataPartition().getShardId()))
+                .collect(Collectors.toList());
+
+        // Create transport request
+        ExecuteDistributedTaskRequest request = new ExecuteDistributedTaskRequest();
+        request.setSearchSourceBuilder(sourceBuilder);
+        request.setIndexName(indexName);
+        request.setShardIds(shardIds);
+        request.setStageId("distributed-scan");
+
+        // Resolve the DiscoveryNode for transport
+        DiscoveryNode targetNode = clusterService.state().nodes().get(nodeId);
+        if (targetNode == null) {
+          throw new IllegalStateException("Cannot resolve DiscoveryNode for nodeId: " + nodeId);
+        }
+
+        CompletableFuture<SearchResponse> future = new CompletableFuture<>();
+        futures.add(future);
+
+        log.debug(
+            "[Distributed Engine] Phase 2 - sending to node: {} for shards: {}", nodeId, shardIds);
+
+        transportService.sendRequest(
+            targetNode,
+            TransportExecuteDistributedTaskAction.NAME,
+            request,
+            new TransportResponseHandler<ExecuteDistributedTaskResponse>() {
+              @Override
+              public ExecuteDistributedTaskResponse read(
+                  org.opensearch.core.common.io.stream.StreamInput in) throws java.io.IOException {
+                return new ExecuteDistributedTaskResponse(in);
+              }
+
+              @Override
+              public void handleResponse(ExecuteDistributedTaskResponse response) {
+                if (response.isSuccessful() && response.getSearchResponse() != null) {
+                  log.debug(
+                      "[Distributed Engine] Phase 2 - received response from node: {}", nodeId);
+                  future.complete(response.getSearchResponse());
+                } else {
+                  String errorMsg =
+                      response.getErrorMessage() != null
+                          ? response.getErrorMessage()
+                          : "No SearchResponse in response from node: " + nodeId;
+                  future.completeExceptionally(new RuntimeException(errorMsg));
+                }
+              }
+
+              @Override
+              public void handleException(TransportException exp) {
+                log.error(
+                    "[Distributed Engine] Phase 2 - transport exception from node: {}",
+                    nodeId,
+                    exp);
+                future.completeExceptionally(exp);
+              }
+
+              @Override
+              public String executor() {
+                return org.opensearch.threadpool.ThreadPool.Names.GENERIC;
+              }
+            });
+      }
+
+      // Step 7: Wait for all transport responses
+      CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
+
+      // Step 8: Collect SearchResponses from all nodes
+      List<SearchResponse> shardResponses = new ArrayList<>();
+      for (CompletableFuture<SearchResponse> future : futures) {
+        shardResponses.add(future.get());
+      }
+
+      log.info(
+          "[Distributed Engine] Phase 2 - merging results from {} node responses",
+          shardResponses.size());
+
+      // Step 9: Merge results and build QueryResponse
+      QueryResponse queryResponse =
+          mergeSearchResponses(
+              shardResponses,
+              exprValueFactory,
+              isAggregation,
+              includes,
+              relNode.getRowType(),
+              context.sysLimit.querySizeLimit());
+
+      statement.close();
+
+      plan.markCompleted();
+      log.info(
+          "[Distributed Engine] Phase 2 - query completed with {} results for plan: {}",
+          queryResponse.getResults().size(),
+          plan.getPlanId());
+      listener.onResponse(queryResponse);
+
+    } catch (Exception e) {
+      if (statement != null) {
+        try {
+          statement.close();
+        } catch (SQLException ignored) {
+          // ignore close errors
+        }
+      }
+      throw new RuntimeException("Phase 2 transport-based execution failed", e);
+    }
+  }
+
+  /**
+   * Phase 1B fallback: Executes query using sequential per-shard OpenSearch search API calls on the
+   * coordinator node. Calcite is used only for logical optimization (pushdown rules populate
+   * PushDownContext). After optimization, the SearchSourceBuilder is extracted and executed
+   * directly against individual shards via client.search().
+   *
+   * @param plan The distributed plan containing the RelNode and CalcitePlanContext
+   * @param listener Response listener for the query results
+   */
+  private void executePerShardLocal(
+      DistributedPhysicalPlan plan, ResponseListener<QueryResponse> listener) {
+    RelNode relNode = (RelNode) plan.getRelNode();
+    CalcitePlanContext context = (CalcitePlanContext) plan.getPlanContext();
+
+    log.info(
+        "[Distributed Engine] Phase 1B - executing per-shard search locally for plan: {}",
+        plan.getPlanId());
+
+    PreparedStatement statement = null;
+    try {
+      // Step 1: Run Calcite optimization (VolcanoPlanner applies pushdown rules)
+      statement = OpenSearchRelRunners.run(context, relNode);
+
+      // Step 2: Read the optimized scan node from ThreadLocal
       Object scanObj = CalcitePlanContext.optimizedScanNode.get();
       CalcitePlanContext.optimizedScanNode.remove();
 
@@ -247,8 +455,6 @@ public class DistributedTaskScheduler {
       OpenSearchExprValueFactory exprValueFactory = requestBuilder.getExprValueFactory();
       boolean isAggregation = sourceBuilder.size() == 0 && sourceBuilder.aggregations() != null;
 
-      // Extract includes from FetchSourceContext (same as
-      // OpenSearchRequestBuilder.buildRequestWithPit)
       org.opensearch.search.fetch.subphase.FetchSourceContext fetchSource =
           sourceBuilder.fetchSource();
       List<String> includes =
@@ -256,8 +462,6 @@ public class DistributedTaskScheduler {
 
       // Step 4: Get shard partitions from the SCAN stage work units
       List<WorkUnit> scanWorkUnits = getScanStageWorkUnits(plan);
-
-      // Get index name from the first work unit's partition (set during plan creation)
       String indexName = scanWorkUnits.getFirst().getDataPartition().getIndexName();
 
       log.info(
@@ -265,13 +469,12 @@ public class DistributedTaskScheduler {
           indexName,
           isAggregation);
 
-      // Step 5: Execute per-shard searches
+      // Step 5: Execute per-shard searches sequentially
       List<SearchResponse> shardResponses = new ArrayList<>();
       for (WorkUnit wu : scanWorkUnits) {
         DataPartition partition = wu.getDataPartition();
         String shardId = partition.getShardId();
 
-        // Reuse source builder (safe for Phase 1B sequential execution on single node)
         SearchRequest searchRequest = new SearchRequest(indexName);
         searchRequest.source(sourceBuilder);
         searchRequest.preference("_shards:" + shardId);
@@ -304,7 +507,6 @@ public class DistributedTaskScheduler {
               relNode.getRowType(),
               context.sysLimit.querySizeLimit());
 
-      // Close the PreparedStatement (we don't call executeQuery on it)
       statement.close();
 
       plan.markCompleted();
@@ -315,7 +517,6 @@ public class DistributedTaskScheduler {
       listener.onResponse(queryResponse);
 
     } catch (Exception e) {
-      // Close statement if open
       if (statement != null) {
         try {
           statement.close();
@@ -389,12 +590,27 @@ public class DistributedTaskScheduler {
         // Convert merged aggregations to ExprValue via the parser set during pushdown
         if (exprValueFactory.getParser() != null) {
           List<Map<String, Object>> parsedAggs = exprValueFactory.getParser().parse(merged);
+          List<RelDataTypeField> schemaFields = rowType.getFieldList();
           for (Map<String, Object> entry : parsedAggs) {
-            Map<String, ExprValue> row = new LinkedHashMap<>();
+            // Build unordered row from parsed aggregation
+            Map<String, ExprValue> unorderedRow = new HashMap<>();
             for (Map.Entry<String, Object> kv : entry.entrySet()) {
-              row.put(kv.getKey(), exprValueFactory.construct(kv.getKey(), kv.getValue(), true));
+              unorderedRow.put(
+                  kv.getKey(), exprValueFactory.construct(kv.getKey(), kv.getValue(), true));
             }
-            values.add(ExprTupleValue.fromExprValueMap(row));
+            // Reorder row to match schema column order from RelDataType
+            Map<String, ExprValue> orderedRow = new LinkedHashMap<>();
+            for (RelDataTypeField field : schemaFields) {
+              ExprValue val = unorderedRow.get(field.getName());
+              if (val != null) {
+                orderedRow.put(field.getName(), val);
+              }
+            }
+            // Include any remaining keys not in schema (safety fallback)
+            for (Map.Entry<String, ExprValue> kv : unorderedRow.entrySet()) {
+              orderedRow.putIfAbsent(kv.getKey(), kv.getValue());
+            }
+            values.add(ExprTupleValue.fromExprValueMap(orderedRow));
           }
         }
       }

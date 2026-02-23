@@ -13,8 +13,8 @@ import org.opensearch.cluster.routing.IndexRoutingTable;
 import org.opensearch.cluster.routing.IndexShardRoutingTable;
 import org.opensearch.cluster.routing.ShardRouting;
 import org.opensearch.cluster.service.ClusterService;
-import org.opensearch.sql.planner.distributed.CalciteDistributedPhysicalPlanner.PartitionDiscovery;
 import org.opensearch.sql.planner.distributed.DataPartition;
+import org.opensearch.sql.planner.distributed.DistributedQueryPlanner.PartitionDiscovery;
 
 /**
  * OpenSearch-specific implementation of partition discovery for distributed queries.

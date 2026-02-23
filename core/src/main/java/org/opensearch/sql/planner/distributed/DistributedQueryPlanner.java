@@ -25,11 +25,22 @@ import org.opensearch.sql.executor.ExecutionEngine.Schema;
 import org.opensearch.sql.executor.ExecutionEngine.Schema.Column;
 
 /**
- * Converts Calcite RelNode trees into multi-stage distributed execution plans.
+ * Custom distributed query planner that converts Calcite RelNode trees into multi-stage distributed
+ * execution plans.
  *
- * <p>The Calcite-based distributed physical planner analyzes PPL queries that have been converted
- * to Calcite RelNode trees and breaks them into stages that can be executed across multiple nodes
- * in parallel:
+ * <p>Following the pattern used by all major MPP engines (Trino's PlanFragmenter, Spark's
+ * DAGScheduler, Ballista's DistributedPlanner), this planner operates as a <strong>separate
+ * pass</strong> after Calcite's VolcanoPlanner has optimized the logical plan:
+ *
+ * <ol>
+ *   <li><strong>Step 1</strong>: Calcite VolcanoPlanner optimizes the logical plan
+ *       (filter/project/agg pushdown)
+ *   <li><strong>Step 2</strong>: DistributedQueryPlanner creates distributed execution stages with
+ *       exchange boundaries
+ * </ol>
+ *
+ * <p>The planner analyzes PPL queries that have been converted to Calcite RelNode trees and breaks
+ * them into stages that can be executed across multiple nodes in parallel:
  *
  * <ul>
  *   <li><strong>Stage 1 (SCAN)</strong>: Direct shard access with filters and projections
@@ -37,7 +48,7 @@ import org.opensearch.sql.executor.ExecutionEngine.Schema.Column;
  *   <li><strong>Stage 3 (FINALIZE)</strong>: Global aggregation on coordinator
  * </ul>
  *
- * <p><strong>Phase 1 Support:</strong> Simple aggregation queries with filters
+ * <p><strong>Phase 2 Support:</strong> Scan, filter, projection, and aggregation queries
  *
  * <pre>
  * search source=logs-* | where status >= 400 | stats count(), avg(latency) by service
@@ -53,7 +64,7 @@ import org.opensearch.sql.executor.ExecutionEngine.Schema.Column;
  */
 @Log4j2
 @RequiredArgsConstructor
-public class CalciteDistributedPhysicalPlanner {
+public class DistributedQueryPlanner {
 
   /** Interface for discovering data partitions in tables */
   public interface PartitionDiscovery {
@@ -76,8 +87,8 @@ public class CalciteDistributedPhysicalPlanner {
    * @return Multi-stage distributed execution plan
    */
   public DistributedPhysicalPlan plan(RelNode relNode, CalcitePlanContext context) {
-    String planId = "calcite-distributed-plan-" + UUID.randomUUID().toString().substring(0, 8);
-    log.info("Creating Calcite-based distributed physical plan: {}", planId);
+    String planId = "distributed-plan-" + UUID.randomUUID().toString().substring(0, 8);
+    log.info("Creating distributed physical plan: {}", planId);
 
     try {
       // Analyze the RelNode tree to determine distributed execution strategy
@@ -96,15 +107,15 @@ public class CalciteDistributedPhysicalPlanner {
       DistributedPhysicalPlan distributedPlan =
           DistributedPhysicalPlan.create(planId, stages, analysis.getOutputSchema());
 
-      // Phase 1A: Store RelNode and context for local execution
+      // Store RelNode and context for execution
       distributedPlan.setLocalExecutionContext(relNode, context);
 
-      log.info("Created Calcite distributed plan {} with {} stages", planId, stages.size());
+      log.info("Created distributed plan {} with {} stages", planId, stages.size());
       return distributedPlan;
 
     } catch (Exception e) {
-      log.error("Failed to create Calcite distributed physical plan for: {}", relNode, e);
-      throw new RuntimeException("Failed to create Calcite distributed physical plan", e);
+      log.error("Failed to create distributed physical plan for: {}", relNode, e);
+      throw new RuntimeException("Failed to create distributed physical plan", e);
     }
   }
 
@@ -141,7 +152,7 @@ public class CalciteDistributedPhysicalPlanner {
 
   /** Creates Stage 1: Distributed scanning with filters and projections. */
   private ExecutionStage createScanStage(RelNodeAnalysis analysis) {
-    String stageId = "calcite-scan-stage-" + UUID.randomUUID().toString().substring(0, 8);
+    String stageId = "scan-stage-" + UUID.randomUUID().toString().substring(0, 8);
 
     // Discover partitions for the target table
     List<DataPartition> partitions = partitionDiscovery.discoverPartitions(analysis.getTableName());
@@ -152,18 +163,18 @@ public class CalciteDistributedPhysicalPlanner {
             .map(partition -> createScanWorkUnit(partition, analysis))
             .collect(Collectors.toList());
 
-    log.debug("Created Calcite scan stage {} with {} work units", stageId, workUnits.size());
+    log.debug("Created scan stage {} with {} work units", stageId, workUnits.size());
 
     return ExecutionStage.createScanStage(stageId, workUnits);
   }
 
   /** Creates a scan work unit for a specific partition. */
   private WorkUnit createScanWorkUnit(DataPartition partition, RelNodeAnalysis analysis) {
-    String workUnitId = "calcite-scan-" + partition.getPartitionId();
+    String workUnitId = "scan-" + partition.getPartitionId();
 
     // Create scan operator with filter and projection
     TaskOperator scanOperator =
-        new CalciteLuceneScanOperator(
+        new LuceneScanOperator(
             workUnitId + "-op",
             TaskOperator.OperatorType.SCAN,
             Map.of(
@@ -179,19 +190,16 @@ public class CalciteDistributedPhysicalPlanner {
   /** Creates Stage 2: Partial aggregation processing. */
   private ExecutionStage createPartialAggregationStage(
       RelNodeAnalysis analysis, String scanStageId) {
-    String stageId = "calcite-partial-agg-stage-" + UUID.randomUUID().toString().substring(0, 8);
+    String stageId = "partial-agg-stage-" + UUID.randomUUID().toString().substring(0, 8);
 
     // Create work units for partial aggregation (one per node that has data)
-    // For Phase 1, we'll create a simple work unit per expected node
+    // For Phase 2, we'll create a simple work unit per expected node
     List<WorkUnit> workUnits =
         IntStream.range(0, 3) // Assume 3 data nodes for now
             .mapToObj(i -> createPartialAggregationWorkUnit(i, analysis, scanStageId))
             .collect(Collectors.toList());
 
-    log.debug(
-        "Created Calcite partial aggregation stage {} with {} work units",
-        stageId,
-        workUnits.size());
+    log.debug("Created partial aggregation stage {} with {} work units", stageId, workUnits.size());
 
     return ExecutionStage.createProcessStage(
         stageId, workUnits, List.of(scanStageId), ExecutionStage.DataExchangeType.NONE);
@@ -200,10 +208,10 @@ public class CalciteDistributedPhysicalPlanner {
   /** Creates a partial aggregation work unit. */
   private WorkUnit createPartialAggregationWorkUnit(
       int nodeIndex, RelNodeAnalysis analysis, String scanStageId) {
-    String workUnitId = "calcite-partial-agg-" + nodeIndex;
+    String workUnitId = "partial-agg-" + nodeIndex;
 
     TaskOperator aggregationOperator =
-        new CalcitePartialAggregationOperator(
+        new PartialAggregationOperator(
             workUnitId + "-op",
             TaskOperator.OperatorType.PARTIAL_AGGREGATE,
             Map.of(
@@ -218,11 +226,11 @@ public class CalciteDistributedPhysicalPlanner {
   /** Creates Stage 3: Final aggregation. */
   private ExecutionStage createFinalAggregationStage(
       RelNodeAnalysis analysis, String processStageId) {
-    String stageId = "calcite-final-agg-stage-" + UUID.randomUUID().toString().substring(0, 8);
-    String workUnitId = "calcite-final-agg";
+    String stageId = "final-agg-stage-" + UUID.randomUUID().toString().substring(0, 8);
+    String workUnitId = "final-agg";
 
     TaskOperator finalOperator =
-        new CalciteFinalAggregationOperator(
+        new FinalAggregationOperator(
             workUnitId + "-op",
             TaskOperator.OperatorType.FINAL_AGGREGATE,
             Map.of(
@@ -233,15 +241,15 @@ public class CalciteDistributedPhysicalPlanner {
     WorkUnit finalWorkUnit =
         WorkUnit.createFinalizeUnit(workUnitId, finalOperator, List.of(processStageId));
 
-    log.debug("Created Calcite final aggregation stage {}", stageId);
+    log.debug("Created final aggregation stage {}", stageId);
 
     return ExecutionStage.createFinalizeStage(stageId, finalWorkUnit, List.of(processStageId));
   }
 
   /** Creates a result collection stage for non-aggregation queries. */
   private ExecutionStage createResultCollectionStage(RelNodeAnalysis analysis, String scanStageId) {
-    String stageId = "calcite-collect-stage-" + UUID.randomUUID().toString().substring(0, 8);
-    String workUnitId = "calcite-collect-results";
+    String stageId = "collect-stage-" + UUID.randomUUID().toString().substring(0, 8);
+    String workUnitId = "collect-results";
 
     Map<String, Object> operatorConfig = new HashMap<>();
     if (analysis.getLimit() != null) {
@@ -251,13 +259,13 @@ public class CalciteDistributedPhysicalPlanner {
     operatorConfig.put("relNodeInfo", analysis.getRelNodeInfo());
 
     TaskOperator collectOperator =
-        new CalciteResultCollectionOperator(
+        new ResultCollectionOperator(
             workUnitId + "-op", TaskOperator.OperatorType.FINALIZE, operatorConfig);
 
     WorkUnit collectWorkUnit =
         WorkUnit.createFinalizeUnit(workUnitId, collectOperator, List.of(scanStageId));
 
-    log.debug("Created Calcite result collection stage {}", stageId);
+    log.debug("Created result collection stage {}", stageId);
 
     return ExecutionStage.createFinalizeStage(stageId, collectWorkUnit, List.of(scanStageId));
   }
@@ -278,7 +286,7 @@ public class CalciteDistributedPhysicalPlanner {
       analysis.setDistributable(distributable);
       analysis.setReason(reason);
 
-      // Create output schema (simplified for Phase 1)
+      // Create output schema (simplified for Phase 2)
       Schema outputSchema = createOutputSchema(analysis);
       analysis.setOutputSchema(outputSchema);
 
@@ -340,7 +348,7 @@ public class CalciteDistributedPhysicalPlanner {
           .getGroupSet()
           .forEach(
               groupIndex -> {
-                String fieldName = "field_" + groupIndex; // Simplified for Phase 1
+                String fieldName = "field_" + groupIndex; // Simplified for Phase 2
                 analysis.addGroupByField(fieldName);
               });
 
@@ -373,7 +381,7 @@ public class CalciteDistributedPhysicalPlanner {
 
       if (sort.fetch != null) {
         // Extract limit from fetch
-        analysis.setLimit(100); // Simplified for Phase 1
+        analysis.setLimit(100); // Simplified for Phase 2
       }
 
       log.debug("Found sort with collation: {}", sort.getCollation());
@@ -514,20 +522,20 @@ public class CalciteDistributedPhysicalPlanner {
     }
   }
 
-  // Phase 1A: Operators are no-op shells. Execution is handled by DistributedTaskScheduler
-  // local mode via Calcite. Phase 1B+ will implement per-shard Lucene scanning and
-  // true distributed aggregation operators.
+  // Phase 2: Operators are no-op shells. Execution is handled by DistributedTaskScheduler
+  // via SSB → SearchResponse pipeline (transport-based parallel execution).
+  // The scheduler extracts SearchSourceBuilder from Calcite optimization and sends
+  // it to data nodes via transport, where each node executes client.search() locally.
 
-  private static class CalciteLuceneScanOperator extends TaskOperator {
-    public CalciteLuceneScanOperator(
+  private static class LuceneScanOperator extends TaskOperator {
+    public LuceneScanOperator(
         String operatorId, OperatorType operatorType, Map<String, Object> config) {
       super(operatorId, operatorType, config);
     }
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      // Phase 1A: No-op - execution handled by DistributedTaskScheduler local mode
-      // Phase 1B+: Will implement per-shard Lucene scanning
+      // No-op - execution handled by DistributedTaskScheduler SSB pipeline
       TaskResult result = new TaskResult();
       result.setOutputData(input != null ? input.getInputData() : List.of());
       result.setRecordCount(0);
@@ -545,15 +553,15 @@ public class CalciteDistributedPhysicalPlanner {
     }
   }
 
-  private static class CalcitePartialAggregationOperator extends TaskOperator {
-    public CalcitePartialAggregationOperator(
+  private static class PartialAggregationOperator extends TaskOperator {
+    public PartialAggregationOperator(
         String operatorId, OperatorType operatorType, Map<String, Object> config) {
       super(operatorId, operatorType, config);
     }
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      // Phase 1A: No-op pass-through - Calcite handles aggregation internally
+      // No-op - aggregation handled by OpenSearch's InternalAggregations in SSB pipeline
       TaskResult result = new TaskResult();
       result.setOutputData(input != null ? input.getInputData() : List.of());
       result.setRecordCount(0);
@@ -572,15 +580,15 @@ public class CalciteDistributedPhysicalPlanner {
     }
   }
 
-  private static class CalciteFinalAggregationOperator extends TaskOperator {
-    public CalciteFinalAggregationOperator(
+  private static class FinalAggregationOperator extends TaskOperator {
+    public FinalAggregationOperator(
         String operatorId, OperatorType operatorType, Map<String, Object> config) {
       super(operatorId, operatorType, config);
     }
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      // Phase 1A: No-op pass-through - Calcite handles aggregation internally
+      // No-op - final aggregation handled by InternalAggregations.reduce() in scheduler
       TaskResult result = new TaskResult();
       result.setOutputData(input != null ? input.getInputData() : List.of());
       result.setRecordCount(0);
@@ -598,15 +606,15 @@ public class CalciteDistributedPhysicalPlanner {
     }
   }
 
-  private static class CalciteResultCollectionOperator extends TaskOperator {
-    public CalciteResultCollectionOperator(
+  private static class ResultCollectionOperator extends TaskOperator {
+    public ResultCollectionOperator(
         String operatorId, OperatorType operatorType, Map<String, Object> config) {
       super(operatorId, operatorType, config);
     }
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      // Phase 1A: No-op pass-through - results collected by scheduler
+      // No-op - results collected by scheduler merge pipeline
       TaskResult result = new TaskResult();
       result.setOutputData(input != null ? input.getInputData() : List.of());
       result.setRecordCount(0);

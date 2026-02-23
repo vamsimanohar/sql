@@ -92,7 +92,7 @@ class DistributedExecutionEngineTest {
     // Given
     when(settings.getDistributedExecutionEnabled()).thenReturn(true);
 
-    // Setup mock CalciteDistributedPhysicalPlanner to avoid NPE
+    // Setup mock DistributedQueryPlanner to avoid NPE
     doAnswer(
             invocation -> {
               ResponseListener<QueryResponse> listener = invocation.getArgument(1);
