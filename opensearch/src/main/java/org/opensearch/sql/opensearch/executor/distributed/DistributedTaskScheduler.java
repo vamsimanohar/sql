@@ -38,6 +38,7 @@ import org.opensearch.search.aggregations.InternalAggregations;
 import org.opensearch.search.aggregations.pipeline.PipelineAggregator;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.sql.calcite.CalcitePlanContext;
+import org.opensearch.sql.calcite.plan.rel.LogicalSystemLimit;
 import org.opensearch.sql.calcite.utils.CalciteToolsHelper.OpenSearchRelRunners;
 import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.common.response.ResponseListener;
@@ -394,6 +395,9 @@ public class DistributedTaskScheduler {
               includes,
               relNode.getRowType(),
               context.sysLimit.querySizeLimit());
+
+      // Step 10: Phase 3 - Apply post-merge sort/limit from the original RelNode
+      queryResponse = applyPostMergeOperations(relNode, queryResponse);
 
       statement.close();
 
@@ -1010,6 +1014,131 @@ public class DistributedTaskScheduler {
       plan.markFailed(e.getMessage());
       listener.onFailure(e);
     }
+  }
+
+  /**
+   * Phase 3: Detects Sort/Limit operations in the original RelNode tree that wrap an aggregation
+   * and applies them on the coordinator after merging distributed results. This handles patterns
+   * like `| stats count() by gender | sort - count()` and `| stats count() by gender | head 5`.
+   */
+  private QueryResponse applyPostMergeOperations(RelNode relNode, QueryResponse response) {
+    // Walk the RelNode tree to find Sort/Limit operations
+    SortLimitInfo sortLimit = extractSortLimit(relNode);
+    if (sortLimit == null) {
+      return response;
+    }
+
+    List<ExprValue> results = new ArrayList<>(response.getResults());
+    List<RelDataTypeField> fields = relNode.getRowType().getFieldList();
+
+    // Apply sort if present
+    if (sortLimit.sortFieldIndex >= 0 && sortLimit.sortFieldIndex < fields.size()) {
+      String sortFieldName = fields.get(sortLimit.sortFieldIndex).getName();
+      log.info(
+          "[Distributed Engine] Phase 3 - applying post-merge sort on field: {} ({})",
+          sortFieldName,
+          sortLimit.descending ? "DESC" : "ASC");
+
+      results.sort(
+          (a, b) -> {
+            ExprValue va = a.tupleValue().get(sortFieldName);
+            ExprValue vb = b.tupleValue().get(sortFieldName);
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            int cmp = va.compareTo(vb);
+            return sortLimit.descending ? -cmp : cmp;
+          });
+    }
+
+    // Apply limit if present
+    if (sortLimit.limit != null && sortLimit.limit > 0 && results.size() > sortLimit.limit) {
+      log.info(
+          "[Distributed Engine] Phase 3 - applying post-merge limit: {} (from {} rows)",
+          sortLimit.limit,
+          results.size());
+      results = results.subList(0, sortLimit.limit);
+    }
+
+    return new QueryResponse(response.getSchema(), results, null);
+  }
+
+  /**
+   * Extracts Sort and Limit information from the RelNode tree. Skips LogicalSystemLimit (the
+   * system-level query size limit) and walks into its children to find user-level LogicalSort that
+   * wraps an aggregation.
+   */
+  private SortLimitInfo extractSortLimit(RelNode node) {
+    // Skip LogicalSystemLimit — it represents the system query size limit (e.g., fetch=10000),
+    // not a user-specified sort/limit. Walk into its child to find the actual LogicalSort.
+    if (node instanceof LogicalSystemLimit) {
+      for (RelNode input : node.getInputs()) {
+        SortLimitInfo found = extractSortLimit(input);
+        if (found != null) {
+          return found;
+        }
+      }
+      return null;
+    }
+
+    if (node instanceof org.apache.calcite.rel.core.Sort sort) {
+      SortLimitInfo info = new SortLimitInfo();
+
+      // Extract sort field and direction
+      if (sort.getCollation() != null && !sort.getCollation().getFieldCollations().isEmpty()) {
+        org.apache.calcite.rel.RelFieldCollation collation =
+            sort.getCollation().getFieldCollations().get(0);
+        info.sortFieldIndex = collation.getFieldIndex();
+        info.descending =
+            collation.getDirection()
+                    == org.apache.calcite.rel.RelFieldCollation.Direction.DESCENDING
+                || collation.getDirection()
+                    == org.apache.calcite.rel.RelFieldCollation.Direction.STRICTLY_DESCENDING;
+      }
+
+      // Extract limit (fetch)
+      if (sort.fetch != null) {
+        try {
+          info.limit = ((org.apache.calcite.rex.RexLiteral) sort.fetch).getValueAs(Integer.class);
+        } catch (Exception e) {
+          // Not a literal limit, skip
+        }
+      }
+
+      // Only return if this Sort wraps an Aggregate (post-aggregation sort)
+      if (hasAggregateBelow(sort.getInput())) {
+        return info;
+      }
+      return null;
+    }
+
+    // Walk through wrapper nodes (Project, etc.) to find Sort
+    for (RelNode input : node.getInputs()) {
+      SortLimitInfo found = extractSortLimit(input);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  /** Checks if there is an Aggregate node in the subtree. */
+  private boolean hasAggregateBelow(RelNode node) {
+    if (node instanceof org.apache.calcite.rel.core.Aggregate) {
+      return true;
+    }
+    for (RelNode input : node.getInputs()) {
+      if (hasAggregateBelow(input)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static class SortLimitInfo {
+    int sortFieldIndex = -1;
+    boolean descending = false;
+    Integer limit = null;
   }
 
   /** Shuts down the scheduler and releases resources. */

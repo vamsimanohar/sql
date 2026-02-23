@@ -361,7 +361,32 @@ public class CalciteToolsHelper {
           }
         };
       }
+      // Phase 3: Root is not Scannable (e.g., Sort wraps Aggregate), but
+      // a Scannable child may exist deeper in the tree. Store it so the
+      // DistributedTaskScheduler can extract the SSB for transport execution
+      // and apply sort/limit on the coordinator after merge.
+      Scannable innerScannable = findScannable(root.rel);
+      if (innerScannable != null) {
+        CalcitePlanContext.optimizedScanNode.set(innerScannable);
+      }
       return super.implement(root);
+    }
+
+    /**
+     * Walks the RelNode tree to find a Scannable node (e.g., CalciteIndexScan) that may be wrapped
+     * by Sort, Project, or other non-Scannable nodes.
+     */
+    private Scannable findScannable(org.apache.calcite.rel.RelNode rel) {
+      if (rel instanceof Scannable) {
+        return (Scannable) rel;
+      }
+      for (org.apache.calcite.rel.RelNode input : rel.getInputs()) {
+        Scannable found = findScannable(input);
+        if (found != null) {
+          return found;
+        }
+      }
+      return null;
     }
 
     @Override
