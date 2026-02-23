@@ -286,16 +286,29 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       return false;
     }
 
-    // For Phase 1: Enable distributed execution for Calcite RelNodes to test the planner
-    // TODO: In future phases, add more sophisticated analysis:
-    // - Check RelNode types (TableScan + Filter + Aggregate = good candidate)
-    // - Analyze query complexity and estimated data volume
-    // - Determine if distributed execution would provide benefits
+    // Check for unsupported operations: Join queries require shuffle exchange (Phase 4)
+    if (containsJoin(plan)) {
+      logger.debug(
+          "Query contains join — routing to legacy engine (join distribution not yet supported)");
+      return false;
+    }
 
     logger.debug(
-        "Calcite distributed execution enabled for testing - plan: {}",
-        plan.getClass().getSimpleName());
-    return true; // Enable for Phase 1 testing
+        "Calcite distributed execution enabled - plan: {}", plan.getClass().getSimpleName());
+    return true;
+  }
+
+  /** Checks if the RelNode tree contains a Join operator (unsupported for distributed). */
+  private boolean containsJoin(RelNode node) {
+    if (node instanceof org.apache.calcite.rel.core.Join) {
+      return true;
+    }
+    for (RelNode input : node.getInputs()) {
+      if (containsJoin(input)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
