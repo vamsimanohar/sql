@@ -115,9 +115,16 @@ public class OpenSearchPartitionDiscovery implements PartitionDiscovery {
       throw new IllegalArgumentException("Table name cannot be null");
     }
 
-    // For Phase 1, simple pattern handling
-    // Remove any quotes and normalize
     String pattern = tableName.trim();
+
+    // Handle Calcite qualified name format: [schema, table]
+    if (pattern.startsWith("[") && pattern.endsWith("]")) {
+      pattern = pattern.substring(1, pattern.length() - 1);
+      String[] parts = pattern.split(",");
+      pattern = parts[parts.length - 1].trim();
+    }
+
+    // Remove quotes if present
     if (pattern.startsWith("\"") && pattern.endsWith("\"")) {
       pattern = pattern.substring(1, pattern.length() - 1);
     }

@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.opensearch.sql.executor.ExecutionEngine.Schema;
@@ -45,7 +44,6 @@ import org.opensearch.sql.planner.SerializablePlan;
  * </pre>
  */
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
 public class DistributedPhysicalPlan implements SerializablePlan {
 
@@ -69,6 +67,50 @@ public class DistributedPhysicalPlan implements SerializablePlan {
 
   /** Current execution status of the plan */
   private PlanStatus status;
+
+  /**
+   * Transient RelNode for Phase 1A local execution. Not serialized - only used when executing
+   * locally via Calcite on the coordinator node.
+   */
+  private transient Object relNode;
+
+  /**
+   * Transient CalcitePlanContext for Phase 1A local execution. Stored as Object to avoid coupling
+   * the plan class to Calcite-specific types. Not serialized.
+   */
+  private transient Object planContext;
+
+  /**
+   * All-args constructor for the serializable fields (excludes transient local execution fields).
+   */
+  public DistributedPhysicalPlan(
+      String planId,
+      List<ExecutionStage> executionStages,
+      Schema outputSchema,
+      double estimatedCost,
+      long estimatedMemoryBytes,
+      Map<String, Object> planMetadata,
+      PlanStatus status) {
+    this.planId = planId;
+    this.executionStages = executionStages;
+    this.outputSchema = outputSchema;
+    this.estimatedCost = estimatedCost;
+    this.estimatedMemoryBytes = estimatedMemoryBytes;
+    this.planMetadata = planMetadata;
+    this.status = status;
+  }
+
+  /**
+   * Sets the local execution context for Phase 1A. Stores the RelNode and CalcitePlanContext so the
+   * scheduler can execute the query locally via Calcite without transport.
+   *
+   * @param relNode The Calcite RelNode tree
+   * @param planContext The CalcitePlanContext (stored as Object to avoid type coupling)
+   */
+  public void setLocalExecutionContext(Object relNode, Object planContext) {
+    this.relNode = relNode;
+    this.planContext = planContext;
+  }
 
   /** Enumeration of distributed plan execution status. */
   public enum PlanStatus {
@@ -106,11 +148,13 @@ public class DistributedPhysicalPlan implements SerializablePlan {
                     stage.getWorkUnits().stream()
                         .mapToDouble(
                             wu ->
-                                wu.getTaskOperator()
-                                    .estimateCost(
-                                        wu.getDataPartition() != null
-                                            ? wu.getDataPartition().getEstimatedSizeBytes()
-                                            : 0))
+                                wu.getTaskOperator() != null
+                                    ? wu.getTaskOperator()
+                                        .estimateCost(
+                                            wu.getDataPartition() != null
+                                                ? wu.getDataPartition().getEstimatedSizeBytes()
+                                                : 0)
+                                    : 0.0)
                         .sum())
             .sum();
 
@@ -122,7 +166,7 @@ public class DistributedPhysicalPlan implements SerializablePlan {
         outputSchema,
         totalCost,
         totalMemory,
-        Map.of(),
+        new HashMap<>(),
         PlanStatus.CREATED);
   }
 

@@ -5,8 +5,10 @@
 
 package org.opensearch.sql.opensearch.executor;
 
-import lombok.RequiredArgsConstructor;
+import java.util.List;
+import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.cluster.service.ClusterService;
@@ -20,8 +22,11 @@ import org.opensearch.sql.opensearch.executor.distributed.OpenSearchPartitionDis
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.planner.distributed.CalciteDistributedPhysicalPlanner;
 import org.opensearch.sql.planner.distributed.DistributedPhysicalPlan;
+import org.opensearch.sql.planner.distributed.ExecutionStage;
+import org.opensearch.sql.planner.distributed.WorkUnit;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 import org.opensearch.transport.TransportService;
+import org.opensearch.transport.client.Client;
 
 /**
  * Distributed execution engine that routes queries between legacy single-node execution and
@@ -30,18 +35,28 @@ import org.opensearch.transport.TransportService;
  * <p>This engine serves as the entry point for distributed PPL query processing, with fallback to
  * the legacy OpenSearchExecutionEngine for compatibility.
  */
-@RequiredArgsConstructor
 public class DistributedExecutionEngine implements ExecutionEngine {
   private static final Logger logger = LogManager.getLogger(DistributedExecutionEngine.class);
 
   private final OpenSearchExecutionEngine legacyEngine;
   private final OpenSearchSettings settings;
-  private final TransportService transportService;
-  private final ClusterService clusterService;
+  private final CalciteDistributedPhysicalPlanner calciteDistributedPlanner;
+  private final DistributedTaskScheduler distributedTaskScheduler;
 
-  // Lazy-initialized components for distributed execution
-  private volatile CalciteDistributedPhysicalPlanner calciteDistributedPlanner;
-  private volatile DistributedTaskScheduler distributedTaskScheduler;
+  public DistributedExecutionEngine(
+      OpenSearchExecutionEngine legacyEngine,
+      OpenSearchSettings settings,
+      ClusterService clusterService,
+      TransportService transportService,
+      Client client) {
+    this.legacyEngine = legacyEngine;
+    this.settings = settings;
+    this.calciteDistributedPlanner =
+        new CalciteDistributedPhysicalPlanner(new OpenSearchPartitionDiscovery(clusterService));
+    this.distributedTaskScheduler =
+        new DistributedTaskScheduler(transportService, clusterService, client);
+    logger.info("Initialized DistributedExecutionEngine");
+  }
 
   @Override
   public void execute(PhysicalPlan plan, ResponseListener<QueryResponse> listener) {
@@ -90,8 +105,141 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       ExplainMode mode,
       CalcitePlanContext context,
       ResponseListener<ExplainResponse> listener) {
-    // For Calcite-based explain, delegate to legacy engine
-    legacyEngine.explain(plan, mode, context, listener);
+    if (isDistributedEnabled()) {
+      explainDistributed(plan, mode, context, listener);
+    } else {
+      legacyEngine.explain(plan, mode, context, listener);
+    }
+  }
+
+  /**
+   * Generates an explain response showing the distributed execution plan. Shows the Calcite logical
+   * plan and the distributed stage breakdown (work units, partitions, operators).
+   */
+  private void explainDistributed(
+      RelNode plan,
+      ExplainMode mode,
+      CalcitePlanContext context,
+      ResponseListener<ExplainResponse> listener) {
+    try {
+      // Calcite logical plan (does not consume the JDBC connection)
+      SqlExplainLevel level =
+          switch (mode) {
+            case COST -> SqlExplainLevel.ALL_ATTRIBUTES;
+            case SIMPLE -> SqlExplainLevel.NO_ATTRIBUTES;
+            default -> SqlExplainLevel.EXPPLAN_ATTRIBUTES;
+          };
+      String logical = RelOptUtil.toString(plan, level);
+
+      // Create distributed plan (analyzes RelNode tree + discovers partitions, no execution)
+      DistributedPhysicalPlan distributedPlan = calciteDistributedPlanner.plan(plan, context);
+      String distributed = formatDistributedPlan(distributedPlan);
+
+      listener.onResponse(
+          new ExplainResponse(new ExplainResponseNodeV2(logical, distributed, null)));
+    } catch (Exception e) {
+      logger.error("Error generating distributed explain", e);
+      listener.onFailure(e);
+    }
+  }
+
+  /**
+   * Formats a DistributedPhysicalPlan as a human-readable tree for explain output. Uses box-drawing
+   * characters similar to Trino's TextRenderer and numbered stages like Spark.
+   */
+  private String formatDistributedPlan(DistributedPhysicalPlan plan) {
+    StringBuilder sb = new StringBuilder();
+    List<ExecutionStage> stages = plan.getExecutionStages();
+
+    // Header
+    sb.append("== Distributed Execution Plan ==\n");
+    sb.append("Plan: ").append(plan.getPlanId()).append("\n");
+    sb.append("Mode: Phase 1B (per-shard search)\n");
+    sb.append("Stages: ").append(stages.size()).append("\n");
+
+    for (int i = 0; i < stages.size(); i++) {
+      ExecutionStage stage = stages.get(i);
+      boolean isLast = (i == stages.size() - 1);
+      List<WorkUnit> workUnits = stage.getWorkUnits();
+
+      // Stage connector
+      if (i > 0) {
+        sb.append("\u2502\n");
+        sb.append("\u25bc\n");
+      } else {
+        sb.append("\n");
+      }
+
+      // Stage header: [1] SCAN  (exchange: NONE, parallelism: 5)
+      sb.append("[").append(i + 1).append("] ").append(stage.getStageType());
+      sb.append("  (exchange: ").append(stage.getDataExchange());
+      sb.append(", parallelism: ").append(stage.getEstimatedParallelism()).append(")\n");
+
+      // Indent prefix for content under this stage
+      String indent = isLast ? "    " : "\u2502   ";
+
+      // Dependencies
+      if (stage.getDependencyStages() != null && !stage.getDependencyStages().isEmpty()) {
+        sb.append(indent).append("Depends on: ");
+        sb.append(String.join(", ", stage.getDependencyStages())).append("\n");
+      }
+
+      // Work units as tree
+      if (workUnits.isEmpty()) {
+        sb.append(indent).append("(no work units - partitions pending)\n");
+      } else {
+        for (int j = 0; j < workUnits.size(); j++) {
+          WorkUnit wu = workUnits.get(j);
+          boolean isLastWu = (j == workUnits.size() - 1);
+          String branch = isLastWu ? "\u2514\u2500 " : "\u251c\u2500 ";
+
+          sb.append(indent).append(branch);
+          formatWorkUnit(sb, wu);
+          sb.append("\n");
+        }
+      }
+    }
+
+    return sb.toString();
+  }
+
+  /** Formats a single work unit inline: operator [type] -> node (partition details). */
+  private void formatWorkUnit(StringBuilder sb, WorkUnit wu) {
+    // Operator type from TaskOperator (the semantic meaning)
+    if (wu.getTaskOperator() != null) {
+      sb.append(wu.getTaskOperator().getOperatorType());
+    } else {
+      sb.append(wu.getType());
+    }
+
+    // Partition info (index/shard)
+    if (wu.getDataPartition() != null) {
+      String index = wu.getDataPartition().getIndexName();
+      String shard = wu.getDataPartition().getShardId();
+      if (index != null) {
+        sb.append("  [").append(index);
+        if (shard != null) {
+          sb.append("/").append(shard);
+        }
+        sb.append("]");
+      }
+      long sizeBytes = wu.getDataPartition().getEstimatedSizeBytes();
+      if (sizeBytes > 0) {
+        sb.append("  ~").append(formatBytes(sizeBytes));
+      }
+    }
+
+    // Target node
+    if (wu.getAssignedNodeId() != null) {
+      sb.append("  \u2192 ").append(wu.getAssignedNodeId());
+    }
+  }
+
+  private static String formatBytes(long bytes) {
+    if (bytes < 1024) return bytes + "B";
+    if (bytes < 1024 * 1024) return String.format("%.1fKB", bytes / 1024.0);
+    if (bytes < 1024 * 1024 * 1024) return String.format("%.1fMB", bytes / (1024.0 * 1024));
+    return String.format("%.1fGB", bytes / (1024.0 * 1024 * 1024));
   }
 
   /**
@@ -185,9 +333,6 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       RelNode plan, CalcitePlanContext context, ResponseListener<QueryResponse> listener) {
 
     try {
-      // Initialize distributed components if needed
-      initializeDistributedComponents();
-
       // Phase 1: Convert RelNode to DistributedPhysicalPlan
       DistributedPhysicalPlan distributedPlan = calciteDistributedPlanner.plan(plan, context);
       logger.info("Created distributed plan: {}", distributedPlan);
@@ -199,27 +344,6 @@ public class DistributedExecutionEngine implements ExecutionEngine {
       logger.error("Error in distributed Calcite execution, falling back to legacy engine", e);
       // Always fallback to legacy engine on any error
       legacyEngine.execute(plan, context, listener);
-    }
-  }
-
-  /** Lazily initializes distributed execution components. */
-  private void initializeDistributedComponents() {
-    if (calciteDistributedPlanner == null) {
-      synchronized (this) {
-        if (calciteDistributedPlanner == null) {
-          // Create partition discovery for OpenSearch shards
-          OpenSearchPartitionDiscovery partitionDiscovery =
-              new OpenSearchPartitionDiscovery(clusterService);
-
-          // Create distributed physical planner
-          calciteDistributedPlanner = new CalciteDistributedPhysicalPlanner(partitionDiscovery);
-
-          // Create distributed task scheduler
-          distributedTaskScheduler = new DistributedTaskScheduler(transportService, clusterService);
-
-          logger.info("Initialized distributed execution components");
-        }
-      }
     }
   }
 

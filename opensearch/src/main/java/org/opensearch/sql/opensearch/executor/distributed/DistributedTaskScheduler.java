@@ -5,8 +5,15 @@
 
 package org.opensearch.sql.opensearch.executor.distributed;
 
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -15,18 +22,46 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeField;
+import org.apache.calcite.sql.type.SqlTypeName;
+import org.locationtech.jts.geom.Point;
+import org.opensearch.action.search.SearchRequest;
+import org.opensearch.action.search.SearchResponse;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.common.util.BigArrays;
+import org.opensearch.search.aggregations.InternalAggregation;
+import org.opensearch.search.aggregations.InternalAggregations;
+import org.opensearch.search.aggregations.pipeline.PipelineAggregator;
+import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.sql.calcite.CalcitePlanContext;
+import org.opensearch.sql.calcite.utils.CalciteToolsHelper.OpenSearchRelRunners;
+import org.opensearch.sql.calcite.utils.OpenSearchTypeFactory;
 import org.opensearch.sql.common.response.ResponseListener;
+import org.opensearch.sql.data.model.ExprTupleValue;
+import org.opensearch.sql.data.model.ExprValue;
+import org.opensearch.sql.data.model.ExprValueUtils;
+import org.opensearch.sql.data.type.ExprCoreType;
+import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.executor.ExecutionEngine.QueryResponse;
+import org.opensearch.sql.executor.ExecutionEngine.Schema;
+import org.opensearch.sql.executor.ExecutionEngine.Schema.Column;
+import org.opensearch.sql.opensearch.data.value.OpenSearchExprGeoPointValue;
+import org.opensearch.sql.opensearch.data.value.OpenSearchExprValueFactory;
+import org.opensearch.sql.opensearch.request.OpenSearchRequestBuilder;
+import org.opensearch.sql.opensearch.response.OpenSearchResponse;
+import org.opensearch.sql.opensearch.storage.scan.AbstractCalciteIndexScan;
+import org.opensearch.sql.planner.distributed.DataPartition;
 import org.opensearch.sql.planner.distributed.DistributedPhysicalPlan;
 import org.opensearch.sql.planner.distributed.ExecutionStage;
 import org.opensearch.sql.planner.distributed.WorkUnit;
 import org.opensearch.transport.TransportException;
 import org.opensearch.transport.TransportResponseHandler;
 import org.opensearch.transport.TransportService;
+import org.opensearch.transport.client.Client;
 
 /**
  * Coordinates the execution of distributed query plans across cluster nodes.
@@ -45,21 +80,28 @@ import org.opensearch.transport.TransportService;
  *
  * <pre>
  * 1. executeQuery(DistributedPhysicalPlan) → Start execution
- * 2. executeStage(ExecutionStage) → Execute ready stages
- * 3. distributeWorkUnits(List&lt;WorkUnit&gt;) → Send tasks to nodes
- * 4. collectResults() → Aggregate results from all nodes
- * 5. Response via QueryResponse callback
+ * 2. Phase 1A: Local Calcite execution (if RelNode available)
+ *    OR Future: executeStage(ExecutionStage) → Execute ready stages via transport
+ * 3. Response via QueryResponse callback
  * </pre>
  *
- * <p><strong>Phase 1 Limitations:</strong> - Simple 3-stage execution (SCAN → PROCESS → FINALIZE) -
- * Basic error handling and retry logic - Single query execution (no concurrent queries)
+ * <p><strong>Phase 1A:</strong> Executes queries locally via Calcite's built-in execution engine,
+ * bypassing transport. This validates the distributed planning pipeline while producing correct
+ * results using the same mechanism as the legacy engine.
  */
 @Log4j2
-@RequiredArgsConstructor
 public class DistributedTaskScheduler {
 
   private final TransportService transportService;
   private final ClusterService clusterService;
+  private final Client client;
+
+  public DistributedTaskScheduler(
+      TransportService transportService, ClusterService clusterService, Client client) {
+    this.transportService = transportService;
+    this.clusterService = clusterService;
+    this.client = client;
+  }
 
   /** Thread pool for coordinating distributed execution */
   private final ExecutorService executorService = Executors.newCachedThreadPool();
@@ -95,7 +137,22 @@ public class DistributedTaskScheduler {
       // Mark plan as executing
       plan.markExecuting();
 
-      // Clear previous execution state
+      // Phase 1B: Per-shard search execution with Phase 1A fallback
+      if (plan.getRelNode() != null) {
+        try {
+          executePerShardSearch(plan, listener);
+        } catch (Exception e) {
+          log.warn(
+              "[Distributed Engine] Per-shard execution failed, falling back to local Calcite"
+                  + " for plan: {}",
+              plan.getPlanId(),
+              e);
+          executeLocalCalcite(plan, listener);
+        }
+        return;
+      }
+
+      // Future: distributed execution via transport
       completedWorkUnits.clear();
       completedStages.clear();
       stageResults.clear();
@@ -108,6 +165,356 @@ public class DistributedTaskScheduler {
       plan.markFailed(e.getMessage());
       listener.onFailure(e);
     }
+  }
+
+  /**
+   * Phase 1A: Executes the query locally via Calcite's built-in execution engine. This bypasses
+   * transport entirely and executes the full query on the coordinator node using the same mechanism
+   * as the legacy OpenSearchExecutionEngine.
+   *
+   * @param plan The distributed plan containing the RelNode and CalcitePlanContext
+   * @param listener Response listener for the query results
+   */
+  private void executeLocalCalcite(
+      DistributedPhysicalPlan plan, ResponseListener<QueryResponse> listener) {
+    try {
+      RelNode relNode = (RelNode) plan.getRelNode();
+      CalcitePlanContext context = (CalcitePlanContext) plan.getPlanContext();
+
+      log.info(
+          "[Distributed Engine] Phase 1A - executing locally via Calcite for plan: {}",
+          plan.getPlanId());
+
+      // Execute via Calcite (same mechanism as legacy engine)
+      try (PreparedStatement statement = OpenSearchRelRunners.run(context, relNode)) {
+        ResultSet resultSet = statement.executeQuery();
+        QueryResponse response =
+            buildQueryResponse(resultSet, relNode.getRowType(), context.sysLimit.querySizeLimit());
+
+        plan.markCompleted();
+        log.info(
+            "[Distributed Engine] Phase 1A - query completed with {} results for plan: {}",
+            response.getResults().size(),
+            plan.getPlanId());
+        listener.onResponse(response);
+      }
+
+    } catch (Exception e) {
+      log.error(
+          "[Distributed Engine] Phase 1A local execution failed for plan: {}", plan.getPlanId(), e);
+      plan.markFailed(e.getMessage());
+      listener.onFailure(e);
+    }
+  }
+
+  /**
+   * Phase 1B: Executes query using per-shard OpenSearch search API calls. Calcite is used only for
+   * logical optimization (pushdown rules populate PushDownContext). After optimization, the
+   * SearchSourceBuilder is extracted and executed directly against individual shards.
+   *
+   * @param plan The distributed plan containing the RelNode and CalcitePlanContext
+   * @param listener Response listener for the query results
+   */
+  private void executePerShardSearch(
+      DistributedPhysicalPlan plan, ResponseListener<QueryResponse> listener) {
+    RelNode relNode = (RelNode) plan.getRelNode();
+    CalcitePlanContext context = (CalcitePlanContext) plan.getPlanContext();
+
+    log.info(
+        "[Distributed Engine] Phase 1B - executing per-shard search for plan: {}",
+        plan.getPlanId());
+
+    PreparedStatement statement = null;
+    try {
+      // Step 1: Run Calcite optimization (VolcanoPlanner applies pushdown rules)
+      // This populates PushDownContext with filter/project/agg/sort/limit operations
+      // and stores the optimized scan node on ThreadLocal
+      statement = OpenSearchRelRunners.run(context, relNode);
+
+      // Step 2: Read the optimized scan node from ThreadLocal (set in implement())
+      Object scanObj = CalcitePlanContext.optimizedScanNode.get();
+      CalcitePlanContext.optimizedScanNode.remove();
+
+      if (!(scanObj instanceof AbstractCalciteIndexScan scan)) {
+        throw new UnsupportedOperationException(
+            "Optimized scan node is not an AbstractCalciteIndexScan: "
+                + (scanObj != null ? scanObj.getClass().getName() : "null"));
+      }
+
+      // Step 3: Extract SearchSourceBuilder from PushDownContext
+      OpenSearchRequestBuilder requestBuilder = scan.getPushDownContext().createRequestBuilder();
+      SearchSourceBuilder sourceBuilder = requestBuilder.getSourceBuilder();
+      OpenSearchExprValueFactory exprValueFactory = requestBuilder.getExprValueFactory();
+      boolean isAggregation = sourceBuilder.size() == 0 && sourceBuilder.aggregations() != null;
+
+      // Extract includes from FetchSourceContext (same as
+      // OpenSearchRequestBuilder.buildRequestWithPit)
+      org.opensearch.search.fetch.subphase.FetchSourceContext fetchSource =
+          sourceBuilder.fetchSource();
+      List<String> includes =
+          fetchSource != null ? Arrays.asList(fetchSource.includes()) : List.of();
+
+      // Step 4: Get shard partitions from the SCAN stage work units
+      List<WorkUnit> scanWorkUnits = getScanStageWorkUnits(plan);
+
+      // Get index name from the first work unit's partition (set during plan creation)
+      String indexName = scanWorkUnits.getFirst().getDataPartition().getIndexName();
+
+      log.info(
+          "[Distributed Engine] Phase 1B - extracted SSB for index: {}, isAgg: {}",
+          indexName,
+          isAggregation);
+
+      // Step 5: Execute per-shard searches
+      List<SearchResponse> shardResponses = new ArrayList<>();
+      for (WorkUnit wu : scanWorkUnits) {
+        DataPartition partition = wu.getDataPartition();
+        String shardId = partition.getShardId();
+
+        // Reuse source builder (safe for Phase 1B sequential execution on single node)
+        SearchRequest searchRequest = new SearchRequest(indexName);
+        searchRequest.source(sourceBuilder);
+        searchRequest.preference("_shards:" + shardId);
+
+        log.debug(
+            "[Distributed Engine] Phase 1B - executing shard search: {}/shard:{}",
+            indexName,
+            shardId);
+
+        SearchResponse response = client.search(searchRequest).actionGet();
+        shardResponses.add(response);
+
+        log.debug(
+            "[Distributed Engine] Phase 1B - shard {} returned {} hits, hasAggs={}",
+            shardId,
+            response.getHits().getHits().length,
+            response.getAggregations() != null);
+      }
+
+      log.info(
+          "[Distributed Engine] Phase 1B - merging results from {} shards", shardResponses.size());
+
+      // Step 6: Merge results and build QueryResponse
+      QueryResponse queryResponse =
+          mergeSearchResponses(
+              shardResponses,
+              exprValueFactory,
+              isAggregation,
+              includes,
+              relNode.getRowType(),
+              context.sysLimit.querySizeLimit());
+
+      // Close the PreparedStatement (we don't call executeQuery on it)
+      statement.close();
+
+      plan.markCompleted();
+      log.info(
+          "[Distributed Engine] Phase 1B - query completed with {} results for plan: {}",
+          queryResponse.getResults().size(),
+          plan.getPlanId());
+      listener.onResponse(queryResponse);
+
+    } catch (Exception e) {
+      // Close statement if open
+      if (statement != null) {
+        try {
+          statement.close();
+        } catch (SQLException ignored) {
+          // ignore close errors
+        }
+      }
+      throw new RuntimeException("Phase 1B per-shard search failed", e);
+    }
+  }
+
+  /**
+   * Gets work units from the SCAN stage of the distributed plan.
+   *
+   * @param plan The distributed plan
+   * @return List of scan work units
+   */
+  private List<WorkUnit> getScanStageWorkUnits(DistributedPhysicalPlan plan) {
+    for (ExecutionStage stage : plan.getExecutionStages()) {
+      if (stage.getStageType() == ExecutionStage.StageType.SCAN) {
+        return stage.getWorkUnits();
+      }
+    }
+    throw new IllegalStateException("No SCAN stage found in distributed plan");
+  }
+
+  /**
+   * Merges SearchResponse results from multiple shards into a single QueryResponse.
+   *
+   * <p>For non-aggregation queries: collects all SearchHits and applies size limit. For aggregation
+   * queries: uses InternalAggregations.reduce() to merge partial aggregation results.
+   *
+   * @param shardResponses List of per-shard SearchResponse
+   * @param exprValueFactory Factory for converting to ExprValue
+   * @param isAggregation Whether this is an aggregation query
+   * @param includes List of field names to include (controls metadata field filtering)
+   * @param rowType RelDataType for schema construction
+   * @param querySizeLimit Maximum number of rows to return
+   * @return Merged QueryResponse
+   */
+  private QueryResponse mergeSearchResponses(
+      List<SearchResponse> shardResponses,
+      OpenSearchExprValueFactory exprValueFactory,
+      boolean isAggregation,
+      List<String> includes,
+      RelDataType rowType,
+      Integer querySizeLimit) {
+
+    List<ExprValue> values = new ArrayList<>();
+
+    if (isAggregation) {
+      // Aggregation merge: use InternalAggregations.reduce()
+      List<InternalAggregations> aggsList = new ArrayList<>();
+      for (SearchResponse response : shardResponses) {
+        if (response.getAggregations() != null) {
+          aggsList.add((InternalAggregations) response.getAggregations());
+        }
+      }
+
+      if (!aggsList.isEmpty()) {
+        // Create a ReduceContext for final reduction
+        InternalAggregation.ReduceContext reduceContext =
+            InternalAggregation.ReduceContext.forFinalReduction(
+                BigArrays.NON_RECYCLING_INSTANCE,
+                null, // ScriptService not needed for basic agg reduce
+                (s) -> {},
+                PipelineAggregator.PipelineTree.EMPTY);
+
+        InternalAggregations merged = InternalAggregations.reduce(aggsList, reduceContext);
+
+        // Convert merged aggregations to ExprValue via the parser set during pushdown
+        if (exprValueFactory.getParser() != null) {
+          List<Map<String, Object>> parsedAggs = exprValueFactory.getParser().parse(merged);
+          for (Map<String, Object> entry : parsedAggs) {
+            Map<String, ExprValue> row = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> kv : entry.entrySet()) {
+              row.put(kv.getKey(), exprValueFactory.construct(kv.getKey(), kv.getValue(), true));
+            }
+            values.add(ExprTupleValue.fromExprValueMap(row));
+          }
+        }
+      }
+    } else {
+      // Non-aggregation merge: collect all SearchHits
+      for (SearchResponse response : shardResponses) {
+        OpenSearchResponse osResponse =
+            new OpenSearchResponse(response, exprValueFactory, includes, false);
+        Iterator<ExprValue> hitIterator = osResponse.iterator();
+        while (hitIterator.hasNext()
+            && (querySizeLimit == null || values.size() < querySizeLimit)) {
+          values.add(hitIterator.next());
+        }
+
+        if (querySizeLimit != null && values.size() >= querySizeLimit) {
+          break;
+        }
+      }
+    }
+
+    // Build schema from RelDataType
+    List<Column> columns = new ArrayList<>();
+    List<RelDataTypeField> fields = rowType.getFieldList();
+    for (RelDataTypeField field : fields) {
+      ExprType exprType;
+      if (field.getType().getSqlTypeName() == SqlTypeName.ANY) {
+        if (!values.isEmpty()) {
+          ExprValue firstVal = values.getFirst().tupleValue().get(field.getName());
+          exprType = firstVal != null ? firstVal.type() : ExprCoreType.UNDEFINED;
+        } else {
+          exprType = ExprCoreType.UNDEFINED;
+        }
+      } else {
+        exprType = OpenSearchTypeFactory.convertRelDataTypeToExprType(field.getType());
+      }
+      columns.add(new Column(field.getName(), null, exprType));
+    }
+
+    Schema schema = new Schema(columns);
+    return new QueryResponse(schema, values, null);
+  }
+
+  /**
+   * Converts a JDBC ResultSet into a QueryResponse with schema and ExprValue rows. Replicates the
+   * logic from OpenSearchExecutionEngine.buildResultSet() to ensure identical output format.
+   */
+  private QueryResponse buildQueryResponse(
+      ResultSet resultSet, RelDataType rowTypes, Integer querySizeLimit) throws SQLException {
+    ResultSetMetaData metaData = resultSet.getMetaData();
+    int columnCount = metaData.getColumnCount();
+    List<RelDataType> fieldTypes =
+        rowTypes.getFieldList().stream().map(RelDataTypeField::getType).toList();
+    List<ExprValue> values = new ArrayList<>();
+
+    // Iterate through the ResultSet and convert rows to ExprValue
+    while (resultSet.next() && (querySizeLimit == null || values.size() < querySizeLimit)) {
+      Map<String, ExprValue> row = new LinkedHashMap<>();
+      for (int i = 1; i <= columnCount; i++) {
+        String columnName = metaData.getColumnName(i);
+        Object value = resultSet.getObject(columnName);
+        Object converted = processValue(value);
+        ExprValue exprValue = ExprValueUtils.fromObjectValue(converted);
+        row.put(columnName, exprValue);
+      }
+      values.add(ExprTupleValue.fromExprValueMap(row));
+    }
+
+    // Build schema from ResultSet metadata and RelDataType
+    List<Column> columns = new ArrayList<>(columnCount);
+    for (int i = 1; i <= columnCount; ++i) {
+      String columnName = metaData.getColumnName(i);
+      RelDataType fieldType = fieldTypes.get(i - 1);
+      ExprType exprType;
+      if (fieldType.getSqlTypeName() == SqlTypeName.ANY) {
+        if (!values.isEmpty()) {
+          exprType = values.getFirst().tupleValue().get(columnName).type();
+        } else {
+          exprType = ExprCoreType.UNDEFINED;
+        }
+      } else {
+        exprType = OpenSearchTypeFactory.convertRelDataTypeToExprType(fieldType);
+      }
+      columns.add(new Column(columnName, null, exprType));
+    }
+
+    Schema schema = new Schema(columns);
+    return new QueryResponse(schema, values, null);
+  }
+
+  /**
+   * Process values recursively, handling geo points and nested maps/lists. Replicates logic from
+   * OpenSearchExecutionEngine.processValue().
+   */
+  private static Object processValue(Object value) {
+    if (value == null) {
+      return null;
+    }
+    if (value instanceof Point) {
+      Point point = (Point) value;
+      return new OpenSearchExprGeoPointValue(point.getY(), point.getX());
+    }
+    if (value instanceof Map) {
+      @SuppressWarnings("unchecked")
+      Map<String, Object> map = (Map<String, Object>) value;
+      Map<String, Object> convertedMap = new HashMap<>();
+      for (Map.Entry<String, Object> entry : map.entrySet()) {
+        convertedMap.put(entry.getKey(), processValue(entry.getValue()));
+      }
+      return convertedMap;
+    }
+    if (value instanceof List) {
+      @SuppressWarnings("unchecked")
+      List<Object> list = (List<Object>) value;
+      List<Object> convertedList = new ArrayList<>();
+      for (Object item : list) {
+        convertedList.add(processValue(item));
+      }
+      return convertedList;
+    }
+    return value;
   }
 
   /** Executes the next batch of ready stages that have no pending dependencies. */
@@ -370,12 +777,12 @@ public class DistributedTaskScheduler {
 
       Object finalResults = stageResults.get(finalStage.getStageId());
 
-      // TODO: Phase 1 - Convert distributed results to QueryResponse
+      // TODO: Phase 1B+ - Convert distributed results to QueryResponse with actual data
       // For now, create a simple response indicating successful completion
       QueryResponse response =
           new QueryResponse(
               plan.getOutputSchema(),
-              List.of(), // Empty results for Phase 1
+              List.of(), // Empty results until transport-based execution is implemented
               null // No cursor support yet
               );
 

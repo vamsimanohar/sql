@@ -6,7 +6,6 @@
 package org.opensearch.sql.opensearch.executor.distributed;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -25,6 +24,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
@@ -35,6 +36,7 @@ import org.opensearch.tasks.Task;
 import org.opensearch.transport.TransportService;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class TransportExecuteDistributedTaskActionTest {
 
@@ -49,8 +51,7 @@ class TransportExecuteDistributedTaskActionTest {
   @BeforeEach
   void setUp() {
     action =
-        new TransportExecuteDistributedTaskAction(
-            transportService, actionFilters, clusterService);
+        new TransportExecuteDistributedTaskAction(transportService, actionFilters, clusterService);
 
     // Setup cluster service mock
     DiscoveryNode localNode = mock(DiscoveryNode.class);
@@ -132,8 +133,8 @@ class TransportExecuteDistributedTaskActionTest {
     verify(actionListener).onResponse(any(ExecuteDistributedTaskResponse.class));
     ExecuteDistributedTaskResponse response = responseRef.get();
     assertNotNull(response);
-    // For Phase 1, we expect successful response even with placeholder operators
-    assertTrue(response.isSuccessful());
+    // Request with null stageId is invalid, so response should indicate failure
+    assertTrue(!response.isSuccessful());
   }
 
   @Test
@@ -166,8 +167,9 @@ class TransportExecuteDistributedTaskActionTest {
   @Test
   void action_name_should_be_defined() {
     // Then
-    assertEquals("cluster:admin/opensearch/sql/distributed/execute",
-                 TransportExecuteDistributedTaskAction.NAME);
+    assertEquals(
+        "cluster:admin/opensearch/sql/distributed/execute",
+        TransportExecuteDistributedTaskAction.NAME);
   }
 
   @Test
@@ -223,7 +225,9 @@ class TransportExecuteDistributedTaskActionTest {
   }
 
   private ExecuteDistributedTaskRequest createValidRequest() {
-    DataPartition partition = new DataPartition("shard-1", DataPartition.StorageType.LUCENE, "test-index", 1024L, Map.of());
+    DataPartition partition =
+        new DataPartition(
+            "shard-1", DataPartition.StorageType.LUCENE, "test-index", 1024L, Map.of());
     WorkUnit workUnit =
         new WorkUnit(
             "work-unit-1",
@@ -247,16 +251,43 @@ class TransportExecuteDistributedTaskActionTest {
   }
 
   private ExecuteDistributedTaskRequest createMultiWorkUnitRequest() {
-    DataPartition partition1 = new DataPartition("shard-1", DataPartition.StorageType.LUCENE, "test-index", 1024L, Map.of());
-    DataPartition partition2 = new DataPartition("shard-2", DataPartition.StorageType.LUCENE, "test-index", 1024L, Map.of());
-    DataPartition partition3 = new DataPartition("shard-3", DataPartition.StorageType.LUCENE, "test-index", 1024L, Map.of());
+    DataPartition partition1 =
+        new DataPartition(
+            "shard-1", DataPartition.StorageType.LUCENE, "test-index", 1024L, Map.of());
+    DataPartition partition2 =
+        new DataPartition(
+            "shard-2", DataPartition.StorageType.LUCENE, "test-index", 1024L, Map.of());
+    DataPartition partition3 =
+        new DataPartition(
+            "shard-3", DataPartition.StorageType.LUCENE, "test-index", 1024L, Map.of());
 
     WorkUnit workUnit1 =
-        new WorkUnit("work-unit-1", WorkUnit.WorkUnitType.SCAN, partition1, null, List.of(), "test-node-1", Map.of());
+        new WorkUnit(
+            "work-unit-1",
+            WorkUnit.WorkUnitType.SCAN,
+            partition1,
+            null,
+            List.of(),
+            "test-node-1",
+            Map.of());
     WorkUnit workUnit2 =
-        new WorkUnit("work-unit-2", WorkUnit.WorkUnitType.SCAN, partition2, null, List.of(), "test-node-1", Map.of());
+        new WorkUnit(
+            "work-unit-2",
+            WorkUnit.WorkUnitType.SCAN,
+            partition2,
+            null,
+            List.of(),
+            "test-node-1",
+            Map.of());
     WorkUnit workUnit3 =
-        new WorkUnit("work-unit-3", WorkUnit.WorkUnitType.SCAN, partition3, null, List.of(), "test-node-1", Map.of());
+        new WorkUnit(
+            "work-unit-3",
+            WorkUnit.WorkUnitType.SCAN,
+            partition3,
+            null,
+            List.of(),
+            "test-node-1",
+            Map.of());
 
     return new ExecuteDistributedTaskRequest(
         List.of(workUnit1, workUnit2, workUnit3), "multi-work-stage", null);

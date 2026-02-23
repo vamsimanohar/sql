@@ -12,6 +12,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import org.opensearch.action.search.SearchResponse;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
@@ -22,14 +23,9 @@ import org.opensearch.core.common.io.stream.StreamOutput;
  * <p>Contains the execution results, performance metrics, and any error information from executing
  * WorkUnits on a remote cluster node.
  *
- * <p><strong>Result Format:</strong> Results are returned as generic Objects to support different
- * data types:
- *
- * <ul>
- *   <li>SCAN stage: Filtered and projected document data
- *   <li>PROCESS stage: Partial aggregation results
- *   <li>FINALIZE stage: Final query results
- * </ul>
+ * <p><strong>Phase 1B Serialization:</strong> Serializes the SearchResponse (which implements
+ * Writeable) for returning per-shard search results from remote nodes. This prepares for Phase 1C
+ * transport-based execution.
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
@@ -52,19 +48,38 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
   /** Error message if execution failed */
   private String errorMessage;
 
+  /** SearchResponse from per-shard execution (Phase 1B). */
+  private SearchResponse searchResponse;
+
+  /** Constructor with original fields for backward compatibility. */
+  public ExecuteDistributedTaskResponse(
+      List<Object> results,
+      Map<String, Object> executionStats,
+      String nodeId,
+      boolean success,
+      String errorMessage) {
+    this.results = results;
+    this.executionStats = executionStats;
+    this.nodeId = nodeId;
+    this.success = success;
+    this.errorMessage = errorMessage;
+  }
+
   /** Constructor for deserialization from stream. */
   public ExecuteDistributedTaskResponse(StreamInput in) throws IOException {
     super(in);
-
-    // TODO: Phase 1 - Implement proper serialization for results
     this.nodeId = in.readString();
     this.success = in.readBoolean();
     this.errorMessage = in.readOptionalString();
 
-    // Note: Results serialization will need to be implemented when
-    // the actual task operators produce concrete result types
-    this.results = List.of(); // Placeholder
-    this.executionStats = Map.of(); // Placeholder
+    // Deserialize SearchResponse (implements Writeable)
+    if (in.readBoolean()) {
+      this.searchResponse = new SearchResponse(in);
+    }
+
+    // Generic results not serialized over transport
+    this.results = List.of();
+    this.executionStats = Map.of();
   }
 
   /** Serializes this response to a stream for network transport. */
@@ -74,8 +89,13 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
     out.writeBoolean(success);
     out.writeOptionalString(errorMessage);
 
-    // TODO: Phase 1 - Implement proper serialization for results
-    // For now, we write minimal placeholder data
+    // Serialize SearchResponse (implements Writeable)
+    if (searchResponse != null) {
+      out.writeBoolean(true);
+      searchResponse.writeTo(out);
+    } else {
+      out.writeBoolean(false);
+    }
   }
 
   /** Creates a successful response with results. */

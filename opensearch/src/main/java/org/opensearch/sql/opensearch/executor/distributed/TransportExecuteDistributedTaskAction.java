@@ -112,6 +112,7 @@ public class TransportExecuteDistributedTaskAction
       // Collect execution statistics
       long executionTime = System.currentTimeMillis() - startTime;
       executionStats.put("executionTimeMs", executionTime);
+      executionStats.put("workUnitsExecuted", successCount + errorCount);
       executionStats.put("successCount", successCount);
       executionStats.put("errorCount", errorCount);
       executionStats.put("resultCount", allResults.size());

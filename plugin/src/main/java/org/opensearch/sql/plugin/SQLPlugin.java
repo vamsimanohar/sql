@@ -95,7 +95,6 @@ import org.opensearch.sql.opensearch.executor.distributed.TransportExecuteDistri
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.opensearch.storage.OpenSearchDataSourceFactory;
 import org.opensearch.sql.opensearch.storage.script.CompoundedScriptEngine;
-import org.opensearch.sql.plugin.config.OpenSearchPluginModule;
 import org.opensearch.sql.plugin.rest.RestPPLQueryAction;
 import org.opensearch.sql.plugin.rest.RestPPLStatsAction;
 import org.opensearch.sql.plugin.rest.RestQuerySettingsAction;
@@ -256,7 +255,7 @@ public class SQLPlugin extends Plugin
     LocalClusterState.state().setPluginSettings((OpenSearchSettings) pluginSettings);
     LocalClusterState.state().setClient(client);
     ModulesBuilder modules = new ModulesBuilder();
-    modules.add(new OpenSearchPluginModule());
+    // Removed OpenSearchPluginModule - SQLPlugin only needs async and direct query services
     modules.add(
         b -> {
           b.bind(NodeClient.class).toInstance((NodeClient) client);

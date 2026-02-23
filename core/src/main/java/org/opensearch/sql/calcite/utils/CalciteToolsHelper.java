@@ -327,6 +327,9 @@ public class CalciteToolsHelper {
         root = root.withRel(plan.rel());
       }
       if (root.rel instanceof Scannable scannable) {
+        // Phase 1B: Store the optimized scan node for distributed execution.
+        // The DistributedTaskScheduler reads this to extract SearchSourceBuilder.
+        CalcitePlanContext.optimizedScanNode.set(scannable);
         Hook.PLAN_BEFORE_IMPLEMENTATION.run(root);
         RelDataType resultType = root.rel.getRowType();
         boolean isDml = root.kind.belongsTo(SqlKind.DML);

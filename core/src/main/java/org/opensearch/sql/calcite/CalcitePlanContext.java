@@ -45,6 +45,13 @@ public class CalcitePlanContext {
   private static final ThreadLocal<Boolean> legacyPreferredFlag =
       ThreadLocal.withInitial(() -> true);
 
+  /**
+   * Phase 1B: Stores the optimized Scannable (CalciteEnumerableIndexScan) after VolcanoPlanner
+   * applies pushdown rules. The distributed scheduler reads this to extract SearchSourceBuilder for
+   * per-shard execution without invoking Calcite's enumerable framework.
+   */
+  public static final ThreadLocal<Object> optimizedScanNode = new ThreadLocal<>();
+
   @Getter @Setter private boolean isResolvingJoinCondition = false;
   @Getter @Setter private boolean isResolvingSubquery = false;
   @Getter @Setter private boolean inCoalesceFunction = false;

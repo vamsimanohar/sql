@@ -67,19 +67,20 @@ public class OpenSearchPluginModule extends AbstractModule {
       ExecutionProtector protector,
       PlanSerializer planSerializer,
       Settings settings,
+      ClusterService clusterService,
       TransportService transportService,
-      ClusterService clusterService) {
-    // Create legacy engine for fallback
+      NodeClient nodeClient) {
+    // Create legacy engine as dependency for distributed engine
     OpenSearchExecutionEngine legacyEngine =
         new OpenSearchExecutionEngine(client, protector, planSerializer);
 
-    // Create OpenSearchSettings instance for distributed configuration
+    // Convert ClusterService to OpenSearchSettings
     OpenSearchSettings openSearchSettings =
         new OpenSearchSettings(clusterService.getClusterSettings());
 
-    // Return distributed engine that wraps legacy engine
+    // Phase 1B: Pass NodeClient for per-shard search execution
     return new DistributedExecutionEngine(
-        legacyEngine, openSearchSettings, transportService, clusterService);
+        legacyEngine, openSearchSettings, clusterService, transportService, nodeClient);
   }
 
   @Provides

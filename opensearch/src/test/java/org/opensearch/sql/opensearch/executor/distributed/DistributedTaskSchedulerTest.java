@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -18,7 +17,6 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayNameGeneration;
@@ -27,6 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.opensearch.cluster.ClusterState;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.node.DiscoveryNodes;
@@ -38,13 +38,16 @@ import org.opensearch.sql.planner.distributed.DistributedPhysicalPlan;
 import org.opensearch.sql.planner.distributed.ExecutionStage;
 import org.opensearch.sql.planner.distributed.WorkUnit;
 import org.opensearch.transport.TransportService;
+import org.opensearch.transport.client.Client;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class DistributedTaskSchedulerTest {
 
   @Mock private TransportService transportService;
   @Mock private ClusterService clusterService;
+  @Mock private Client client;
   @Mock private ClusterState clusterState;
   @Mock private DiscoveryNodes discoveryNodes;
   @Mock private DiscoveryNode dataNode1;
@@ -55,7 +58,7 @@ class DistributedTaskSchedulerTest {
 
   @BeforeEach
   void setUp() {
-    scheduler = new DistributedTaskScheduler(transportService, clusterService);
+    scheduler = new DistributedTaskScheduler(transportService, clusterService, client);
 
     // Setup mock cluster state
     when(clusterService.state()).thenReturn(clusterState);
@@ -190,7 +193,8 @@ class DistributedTaskSchedulerTest {
 
   private DistributedPhysicalPlan createSimplePlan() {
     // Create a valid plan with one stage and one work unit
-    DataPartition partition = new DataPartition("shard-1", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
+    DataPartition partition =
+        new DataPartition("shard-1", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
     WorkUnit workUnit =
         new WorkUnit(
             "work-1",
@@ -222,27 +226,17 @@ class DistributedTaskSchedulerTest {
 
   private DistributedPhysicalPlan createPlanWithMultipleWorkUnits() {
     // Create a plan with work units assigned to different nodes
-    DataPartition partition1 = new DataPartition("shard-1", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
-    DataPartition partition2 = new DataPartition("shard-2", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
+    DataPartition partition1 =
+        new DataPartition("shard-1", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
+    DataPartition partition2 =
+        new DataPartition("shard-2", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
 
     WorkUnit workUnit1 =
         new WorkUnit(
-            "work-1",
-            WorkUnit.WorkUnitType.SCAN,
-            partition1,
-            null,
-            List.of(),
-            "node-1",
-            Map.of());
+            "work-1", WorkUnit.WorkUnitType.SCAN, partition1, null, List.of(), "node-1", Map.of());
     WorkUnit workUnit2 =
         new WorkUnit(
-            "work-2",
-            WorkUnit.WorkUnitType.SCAN,
-            partition2,
-            null,
-            List.of(),
-            "node-2",
-            Map.of());
+            "work-2", WorkUnit.WorkUnitType.SCAN, partition2, null, List.of(), "node-2", Map.of());
 
     ExecutionStage stage =
         new ExecutionStage(

@@ -15,6 +15,7 @@ import org.opensearch.action.ActionRequest;
 import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
+import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.sql.planner.distributed.WorkUnit;
 
 /**
@@ -23,8 +24,9 @@ import org.opensearch.sql.planner.distributed.WorkUnit;
  * <p>Contains the work units to be executed, along with context information needed for execution
  * such as stage ID and input data from previous stages.
  *
- * <p><strong>Serialization:</strong> This class implements OpenSearch's Streamable interface for
- * efficient network serialization between cluster nodes.
+ * <p><strong>Phase 1B Serialization:</strong> Serializes the SearchSourceBuilder (which implements
+ * Writeable) along with index name and shard IDs for per-shard execution on remote nodes. This
+ * prepares for Phase 1C transport-based execution.
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
@@ -41,30 +43,72 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
   /** Input data from previous stages (null for initial scan stages) */
   private Object inputData;
 
+  /** SearchSourceBuilder for per-shard execution (Phase 1B). */
+  private SearchSourceBuilder searchSourceBuilder;
+
+  /** Index name for per-shard execution (Phase 1B). */
+  private String indexName;
+
+  /** Shard IDs to execute on the target node (Phase 1B). */
+  private List<Integer> shardIds;
+
+  /** Constructor with original fields for backward compatibility. */
+  public ExecuteDistributedTaskRequest(List<WorkUnit> workUnits, String stageId, Object inputData) {
+    this.workUnits = workUnits;
+    this.stageId = stageId;
+    this.inputData = inputData;
+  }
+
   /** Constructor for deserialization from stream. */
   public ExecuteDistributedTaskRequest(StreamInput in) throws IOException {
     super(in);
-    // TODO: Phase 1 - Implement proper serialization for WorkUnit and inputData
-    // For now, we'll use basic Java serialization as placeholder
     this.stageId = in.readString();
+    this.indexName = in.readOptionalString();
 
-    // Note: WorkUnit serialization will need to be implemented when
-    // the actual task operators are created in future phases
-    this.workUnits = List.of(); // Placeholder
-    this.inputData = null; // Placeholder
+    // Deserialize SearchSourceBuilder (implements Writeable)
+    if (in.readBoolean()) {
+      this.searchSourceBuilder = new SearchSourceBuilder(in);
+    }
+
+    // Deserialize shard IDs
+    if (in.readBoolean()) {
+      int shardCount = in.readVInt();
+      this.shardIds = new java.util.ArrayList<>(shardCount);
+      for (int i = 0; i < shardCount; i++) {
+        this.shardIds.add(in.readVInt());
+      }
+    }
+
+    // WorkUnit and inputData are not serialized over transport (used locally only)
+    this.workUnits = List.of();
+    this.inputData = null;
   }
 
   /** Serializes this request to a stream for network transport. */
   @Override
   public void writeTo(StreamOutput out) throws IOException {
     super.writeTo(out);
-
-    // TODO: Phase 1 - Implement proper serialization for WorkUnit and inputData
     out.writeString(stageId != null ? stageId : "");
+    out.writeOptionalString(indexName);
 
-    // Note: WorkUnit serialization will need to be implemented when
-    // the actual task operators are created in future phases
-    // For now, we write minimal placeholder data
+    // Serialize SearchSourceBuilder (implements Writeable)
+    if (searchSourceBuilder != null) {
+      out.writeBoolean(true);
+      searchSourceBuilder.writeTo(out);
+    } else {
+      out.writeBoolean(false);
+    }
+
+    // Serialize shard IDs
+    if (shardIds != null) {
+      out.writeBoolean(true);
+      out.writeVInt(shardIds.size());
+      for (int shardId : shardIds) {
+        out.writeVInt(shardId);
+      }
+    } else {
+      out.writeBoolean(false);
+    }
   }
 
   /**
@@ -103,6 +147,7 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
   @Override
   public String toString() {
     return String.format(
-        "ExecuteDistributedTaskRequest{stageId='%s', workUnits=%d}", stageId, getWorkUnitCount());
+        "ExecuteDistributedTaskRequest{stageId='%s', workUnits=%d, index='%s', shards=%s}",
+        stageId, getWorkUnitCount(), indexName, shardIds);
   }
 }

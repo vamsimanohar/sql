@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -23,20 +22,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.common.response.ResponseListener;
-import org.opensearch.sql.data.type.ExprType;
 import org.opensearch.sql.executor.ExecutionContext;
 import org.opensearch.sql.executor.ExecutionEngine;
-import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.executor.ExecutionEngine.QueryResponse;
 import org.opensearch.sql.executor.ExecutionEngine.Schema;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
 import org.opensearch.transport.TransportService;
+import org.opensearch.transport.client.Client;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class DistributedExecutionEngineTest {
 
@@ -44,6 +46,7 @@ class DistributedExecutionEngineTest {
   @Mock private OpenSearchSettings settings;
   @Mock private TransportService transportService;
   @Mock private ClusterService clusterService;
+  @Mock private Client client;
   @Mock private PhysicalPlan physicalPlan;
   @Mock private RelNode relNode;
   @Mock private CalcitePlanContext calciteContext;
@@ -55,7 +58,8 @@ class DistributedExecutionEngineTest {
   @BeforeEach
   void setUp() {
     distributedEngine =
-        new DistributedExecutionEngine(legacyEngine, settings, transportService, clusterService);
+        new DistributedExecutionEngine(
+            legacyEngine, settings, clusterService, transportService, client);
   }
 
   @Test
@@ -93,7 +97,8 @@ class DistributedExecutionEngineTest {
             invocation -> {
               ResponseListener<QueryResponse> listener = invocation.getArgument(1);
               QueryResponse response =
-                  new QueryResponse(new Schema(List.of()), List.of(), null); // Empty response for test
+                  new QueryResponse(
+                      new Schema(List.of()), List.of(), null); // Empty response for test
               listener.onResponse(response);
               return null;
             })
@@ -125,7 +130,8 @@ class DistributedExecutionEngineTest {
   void should_delegate_explain_to_legacy_engine() {
     // Given
     @SuppressWarnings("unchecked")
-    ResponseListener<ExecutionEngine.ExplainResponse> explainListener = mock(ResponseListener.class);
+    ResponseListener<ExecutionEngine.ExplainResponse> explainListener =
+        mock(ResponseListener.class);
 
     // When - Phase 1: Explain always uses legacy engine
     distributedEngine.explain(physicalPlan, explainListener);
@@ -138,7 +144,8 @@ class DistributedExecutionEngineTest {
   void should_delegate_calcite_explain_to_legacy_engine() {
     // Given
     @SuppressWarnings("unchecked")
-    ResponseListener<ExecutionEngine.ExplainResponse> explainListener = mock(ResponseListener.class);
+    ResponseListener<ExecutionEngine.ExplainResponse> explainListener =
+        mock(ResponseListener.class);
     ExplainMode mode = ExplainMode.STANDARD;
 
     // When - Phase 1: Calcite explain always uses legacy engine
@@ -152,7 +159,8 @@ class DistributedExecutionEngineTest {
   void constructor_should_initialize_all_components() {
     // When
     DistributedExecutionEngine engine =
-        new DistributedExecutionEngine(legacyEngine, settings, transportService, clusterService);
+        new DistributedExecutionEngine(
+            legacyEngine, settings, clusterService, transportService, client);
 
     // Then
     assertNotNull(engine);
@@ -166,7 +174,7 @@ class DistributedExecutionEngineTest {
     // Simulate error in distributed execution by throwing exception during initialization
     doAnswer(
             invocation -> {
-              ResponseListener<QueryResponse> listener = invocation.getArgument(1);
+              ResponseListener<QueryResponse> listener = invocation.getArgument(2);
               // Should fall back to legacy engine which will handle the response
               return null;
             })

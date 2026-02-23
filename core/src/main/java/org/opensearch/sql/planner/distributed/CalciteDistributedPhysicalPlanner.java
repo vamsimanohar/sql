@@ -96,6 +96,9 @@ public class CalciteDistributedPhysicalPlanner {
       DistributedPhysicalPlan distributedPlan =
           DistributedPhysicalPlan.create(planId, stages, analysis.getOutputSchema());
 
+      // Phase 1A: Store RelNode and context for local execution
+      distributedPlan.setLocalExecutionContext(relNode, context);
+
       log.info("Created Calcite distributed plan {} with {} stages", planId, stages.size());
       return distributedPlan;
 
@@ -240,14 +243,16 @@ public class CalciteDistributedPhysicalPlanner {
     String stageId = "calcite-collect-stage-" + UUID.randomUUID().toString().substring(0, 8);
     String workUnitId = "calcite-collect-results";
 
+    Map<String, Object> operatorConfig = new HashMap<>();
+    if (analysis.getLimit() != null) {
+      operatorConfig.put("limit", analysis.getLimit());
+    }
+    operatorConfig.put("sortFields", analysis.getSortFields());
+    operatorConfig.put("relNodeInfo", analysis.getRelNodeInfo());
+
     TaskOperator collectOperator =
         new CalciteResultCollectionOperator(
-            workUnitId + "-op",
-            TaskOperator.OperatorType.FINALIZE,
-            Map.of(
-                "limit", analysis.getLimit(),
-                "sortFields", analysis.getSortFields(),
-                "relNodeInfo", analysis.getRelNodeInfo()));
+            workUnitId + "-op", TaskOperator.OperatorType.FINALIZE, operatorConfig);
 
     WorkUnit collectWorkUnit =
         WorkUnit.createFinalizeUnit(workUnitId, collectOperator, List.of(scanStageId));
@@ -303,7 +308,9 @@ public class CalciteDistributedPhysicalPlanner {
     }
 
     private void analyzeTableScan(TableScan tableScan, RelNodeAnalysis analysis) {
-      String tableName = tableScan.getTable().getQualifiedName().toString();
+      List<String> qualifiedName = tableScan.getTable().getQualifiedName();
+      // Last segment is the actual index name (e.g., [default, accounts] -> accounts)
+      String tableName = qualifiedName.get(qualifiedName.size() - 1);
       analysis.setTableName(tableName);
       log.debug("Found table scan: {}", tableName);
     }
@@ -507,7 +514,10 @@ public class CalciteDistributedPhysicalPlanner {
     }
   }
 
-  // Placeholder Calcite-aware task operators - will be implemented in task 4
+  // Phase 1A: Operators are no-op shells. Execution is handled by DistributedTaskScheduler
+  // local mode via Calcite. Phase 1B+ will implement per-shard Lucene scanning and
+  // true distributed aggregation operators.
+
   private static class CalciteLuceneScanOperator extends TaskOperator {
     public CalciteLuceneScanOperator(
         String operatorId, OperatorType operatorType, Map<String, Object> config) {
@@ -516,7 +526,12 @@ public class CalciteDistributedPhysicalPlanner {
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      throw new UnsupportedOperationException("CalciteLuceneScanOperator implementation pending");
+      // Phase 1A: No-op - execution handled by DistributedTaskScheduler local mode
+      // Phase 1B+: Will implement per-shard Lucene scanning
+      TaskResult result = new TaskResult();
+      result.setOutputData(input != null ? input.getInputData() : List.of());
+      result.setRecordCount(0);
+      return result;
     }
 
     @Override
@@ -526,7 +541,7 @@ public class CalciteDistributedPhysicalPlanner {
 
     @Override
     public double estimateCost(long inputSize) {
-      return inputSize * 0.1; // Simple cost model
+      return inputSize * 0.1;
     }
   }
 
@@ -538,8 +553,12 @@ public class CalciteDistributedPhysicalPlanner {
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      throw new UnsupportedOperationException(
-          "CalcitePartialAggregationOperator implementation pending");
+      // Phase 1A: No-op pass-through - Calcite handles aggregation internally
+      TaskResult result = new TaskResult();
+      result.setOutputData(input != null ? input.getInputData() : List.of());
+      result.setRecordCount(0);
+      result.setPartialResult(true);
+      return result;
     }
 
     @Override
@@ -561,8 +580,11 @@ public class CalciteDistributedPhysicalPlanner {
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      throw new UnsupportedOperationException(
-          "CalciteFinalAggregationOperator implementation pending");
+      // Phase 1A: No-op pass-through - Calcite handles aggregation internally
+      TaskResult result = new TaskResult();
+      result.setOutputData(input != null ? input.getInputData() : List.of());
+      result.setRecordCount(0);
+      return result;
     }
 
     @Override
@@ -584,8 +606,11 @@ public class CalciteDistributedPhysicalPlanner {
 
     @Override
     public TaskResult execute(TaskContext context, TaskInput input) {
-      throw new UnsupportedOperationException(
-          "CalciteResultCollectionOperator implementation pending");
+      // Phase 1A: No-op pass-through - results collected by scheduler
+      TaskResult result = new TaskResult();
+      result.setOutputData(input != null ? input.getInputData() : List.of());
+      result.setRecordCount(0);
+      return result;
     }
 
     @Override
