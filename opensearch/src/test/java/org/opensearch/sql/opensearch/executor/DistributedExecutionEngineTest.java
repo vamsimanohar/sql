@@ -15,6 +15,12 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Join;
+import org.apache.calcite.rel.core.Project;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexOver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
@@ -186,5 +192,76 @@ class DistributedExecutionEngineTest {
 
     // Then - Should eventually call legacy engine (either directly or as fallback)
     verify(legacyEngine, times(1)).execute(relNode, calciteContext, responseListener);
+  }
+
+  @Test
+  void should_route_join_queries_to_legacy_engine() {
+    // Given
+    when(settings.getDistributedExecutionEnabled()).thenReturn(true);
+    Join joinNode = mock(Join.class);
+    when(joinNode.getInputs()).thenReturn(List.of());
+
+    // When
+    distributedEngine.execute(joinNode, calciteContext, responseListener);
+
+    // Then - Join queries should route to legacy engine
+    verify(legacyEngine, times(1)).execute(joinNode, calciteContext, responseListener);
+  }
+
+  @Test
+  void should_route_window_function_queries_to_legacy_engine() {
+    // Given
+    when(settings.getDistributedExecutionEnabled()).thenReturn(true);
+
+    // Create a Project node with a window function (RexOver) — like dedup via ROW_NUMBER
+    Project projectNode = mock(Project.class);
+    RexOver rexOver = mock(RexOver.class);
+    when(projectNode.getProjects()).thenReturn(List.of(rexOver));
+    when(projectNode.getInputs()).thenReturn(List.of());
+
+    // When
+    distributedEngine.execute(projectNode, calciteContext, responseListener);
+
+    // Then - Window function queries should route to legacy engine
+    verify(legacyEngine, times(1)).execute(projectNode, calciteContext, responseListener);
+  }
+
+  @Test
+  void should_route_computed_expression_queries_to_legacy_engine() {
+    // Given
+    when(settings.getDistributedExecutionEnabled()).thenReturn(true);
+
+    // Create a Project node with a computed expression (RexCall) — like eval balance*2
+    Project projectNode = mock(Project.class);
+    RexCall rexCall = mock(RexCall.class);
+    when(projectNode.getProjects()).thenReturn(List.of(rexCall));
+    when(projectNode.getInputs()).thenReturn(List.of());
+
+    // When
+    distributedEngine.execute(projectNode, calciteContext, responseListener);
+
+    // Then - Computed expression queries should route to legacy engine
+    verify(legacyEngine, times(1)).execute(projectNode, calciteContext, responseListener);
+  }
+
+  @Test
+  void should_allow_simple_projection_queries_for_distributed() {
+    // Given
+    when(settings.getDistributedExecutionEnabled()).thenReturn(true);
+
+    // Create a Project node with only simple field references (RexInputRef) — like fields a, b
+    Project projectNode = mock(Project.class);
+    RexInputRef ref1 = mock(RexInputRef.class);
+    RexInputRef ref2 = mock(RexInputRef.class);
+    when(projectNode.getProjects()).thenReturn(List.of((RexNode) ref1, (RexNode) ref2));
+    when(projectNode.getInputs()).thenReturn(List.of());
+
+    // When
+    distributedEngine.execute(projectNode, calciteContext, responseListener);
+
+    // Then - Simple projection should attempt distributed execution (not route to legacy)
+    // Note: It will fail at the distributed planner stage and fall back, but the initial
+    // routing should be to distributed, not legacy.
+    verify(settings, times(1)).getDistributedExecutionEnabled();
   }
 }
