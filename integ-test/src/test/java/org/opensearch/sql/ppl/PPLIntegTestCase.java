@@ -288,6 +288,11 @@ public abstract class PPLIntegTestCase extends SQLIntegTestCase {
     }
   }
 
+  protected static boolean isDistributedEnabled() throws IOException {
+    return Boolean.parseBoolean(
+        getClusterSetting(Settings.Key.PPL_DISTRIBUTED_ENABLED.getKeyValue(), "persistent"));
+  }
+
   protected boolean isStandaloneTest() {
     return false; // Override this method in subclasses if needed
   }

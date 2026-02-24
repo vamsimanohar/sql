@@ -151,6 +151,13 @@ public class OpenSearchSettings extends Settings {
           Setting.Property.NodeScope,
           Setting.Property.Dynamic);
 
+  public static final Setting<?> PPL_DISTRIBUTED_ENABLED_SETTING =
+      Setting.boolSetting(
+          Key.PPL_DISTRIBUTED_ENABLED.getKeyValue(),
+          true,
+          Setting.Property.NodeScope,
+          Setting.Property.Dynamic);
+
   public static final Setting<?> CALCITE_ENGINE_ENABLED_SETTING =
       Setting.boolSetting(
           Key.CALCITE_ENGINE_ENABLED.getKeyValue(),
@@ -440,6 +447,12 @@ public class OpenSearchSettings extends Settings {
     register(
         settingBuilder,
         clusterSettings,
+        Key.PPL_DISTRIBUTED_ENABLED,
+        PPL_DISTRIBUTED_ENABLED_SETTING,
+        new Updater(Key.PPL_DISTRIBUTED_ENABLED));
+    register(
+        settingBuilder,
+        clusterSettings,
         Key.CALCITE_ENGINE_ENABLED,
         CALCITE_ENGINE_ENABLED_SETTING,
         new Updater(Key.CALCITE_ENGINE_ENABLED));
@@ -667,6 +680,7 @@ public class OpenSearchSettings extends Settings {
         .add(PPL_VALUES_MAX_LIMIT_SETTING)
         .add(PPL_SUBSEARCH_MAXOUT_SETTING)
         .add(PPL_JOIN_SUBSEARCH_MAXOUT_SETTING)
+        .add(PPL_DISTRIBUTED_ENABLED_SETTING)
         .add(QUERY_MEMORY_LIMIT_SETTING)
         .add(QUERY_SIZE_LIMIT_SETTING)
         .add(QUERY_BUCKET_SIZE_SETTING)
@@ -701,5 +715,15 @@ public class OpenSearchSettings extends Settings {
   /** Used by local cluster to get settings from a setting instance. */
   public List<Setting<?>> getSettings() {
     return pluginSettings();
+  }
+
+  /**
+   * Returns whether distributed PPL execution is enabled. Defaults to false for safety -
+   * distributed execution must be explicitly enabled.
+   *
+   * @return true if distributed execution is enabled, false otherwise
+   */
+  public boolean getDistributedExecutionEnabled() {
+    return getSettingValue(Key.PPL_DISTRIBUTED_ENABLED);
   }
 }

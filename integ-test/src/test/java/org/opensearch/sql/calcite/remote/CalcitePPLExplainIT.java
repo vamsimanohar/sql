@@ -33,6 +33,8 @@ public class CalcitePPLExplainIT extends PPLIntegTestCase {
 
   @Test
   public void testExplainCommand() throws IOException {
+    // Distributed engine has its own explain format (stage-based)
+    org.junit.Assume.assumeFalse(isDistributedEnabled());
     var result = explainQueryToString("source=test | where age = 20 | fields name, age");
     String expected =
         !isPushdownDisabled()
@@ -44,6 +46,8 @@ public class CalcitePPLExplainIT extends PPLIntegTestCase {
 
   @Test
   public void testExplainCommandExtendedWithCodegen() throws IOException {
+    // Distributed engine has its own explain format (stage-based)
+    org.junit.Assume.assumeFalse(isDistributedEnabled());
     var result =
         executeWithReplace(
             "explain extended source=test | where age = 20 | join left=l right=r on l.age=r.age"
@@ -56,6 +60,8 @@ public class CalcitePPLExplainIT extends PPLIntegTestCase {
 
   @Test
   public void testExplainCommandCost() throws IOException {
+    // Distributed engine has its own explain format (stage-based)
+    org.junit.Assume.assumeFalse(isDistributedEnabled());
     var result = executeWithReplace("explain cost source=test | where age = 20 | fields name, age");
     String expected =
         !isPushdownDisabled()
@@ -68,6 +74,8 @@ public class CalcitePPLExplainIT extends PPLIntegTestCase {
 
   @Test
   public void testExplainCommandSimple() throws IOException {
+    // Distributed engine has its own explain format (stage-based)
+    org.junit.Assume.assumeFalse(isDistributedEnabled());
     var result =
         executeWithReplace("explain simple source=test | where age = 20 | fields name, age");
     String expected = loadFromFile("expectedOutput/calcite/explain_filter_simple.json");

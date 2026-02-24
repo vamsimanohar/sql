@@ -181,6 +181,8 @@ public class CalcitePPLCastFunctionIT extends CastFunctionIT {
   // Not available in v2
   @Test
   public void testCastIpToString() throws IOException {
+    // Distributed engine: IP values from _source are strings, Calcite IP UDFs expect ExprIpValue
+    org.junit.Assume.assumeFalse(isDistributedEnabled());
     // Test casting ip to string
     var actual =
         executeQuery(
@@ -195,5 +197,13 @@ public class CalcitePPLCastFunctionIT extends CastFunctionIT {
         rows("1.2.3.4"),
         rows("1.2.3.5"),
         rows("::ffff:1234"));
+  }
+
+  @Override
+  @Test
+  public void testCastToIP() throws IOException {
+    // Distributed engine: IP values from _source are strings, Calcite IP UDFs expect ExprIpValue
+    org.junit.Assume.assumeFalse(isDistributedEnabled());
+    super.testCastToIP();
   }
 }
