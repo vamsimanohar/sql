@@ -7,6 +7,7 @@ package org.opensearch.sql.opensearch.executor.distributed;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -61,6 +62,14 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
   /** Row limit when using operator pipeline mode (Phase 5B). */
   private int queryLimit;
 
+  /**
+   * Filter conditions for operator pipeline. Each entry is a Map with keys: "field" (String), "op"
+   * (String: EQ, NEQ, GT, GTE, LT, LTE), "value" (Object). Multiple conditions are ANDed. Compound
+   * boolean uses "bool" key with "AND"/"OR" and "children" list. Null means match all.
+   */
+  @SuppressWarnings("unchecked")
+  private List<Map<String, Object>> filterConditions;
+
   /** Constructor with original fields for backward compatibility. */
   public ExecuteDistributedTaskRequest(List<WorkUnit> workUnits, String stageId, Object inputData) {
     this.workUnits = workUnits;
@@ -94,6 +103,17 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
       this.fieldNames = in.readStringList();
     }
     this.queryLimit = in.readVInt();
+
+    // Deserialize filter conditions
+    if (in.readBoolean()) {
+      int filterCount = in.readVInt();
+      this.filterConditions = new java.util.ArrayList<>(filterCount);
+      for (int i = 0; i < filterCount; i++) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> condition = (Map<String, Object>) in.readGenericValue();
+        this.filterConditions.add(condition);
+      }
+    }
 
     // WorkUnit and inputData are not serialized over transport (used locally only)
     this.workUnits = List.of();
@@ -135,6 +155,17 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
       out.writeBoolean(false);
     }
     out.writeVInt(queryLimit);
+
+    // Serialize filter conditions
+    if (filterConditions != null && !filterConditions.isEmpty()) {
+      out.writeBoolean(true);
+      out.writeVInt(filterConditions.size());
+      for (Map<String, Object> condition : filterConditions) {
+        out.writeGenericValue(condition);
+      }
+    } else {
+      out.writeBoolean(false);
+    }
   }
 
   /**

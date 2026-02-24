@@ -8,6 +8,7 @@ package org.opensearch.sql.opensearch.executor;
 import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rex.RexCall;
@@ -322,6 +323,11 @@ public class DistributedExecutionEngine implements ExecutionEngine {
     // Join requires multi-table coordination the SSB engine can't express
     if (node instanceof Join) {
       return "Join";
+    }
+
+    // Aggregate requires partial/final aggregation not yet implemented
+    if (node instanceof Aggregate) {
+      return "Aggregate (stats/top/rare) — requires distributed aggregation";
     }
 
     // Check Project nodes for computed expressions (eval) and window functions (dedup)

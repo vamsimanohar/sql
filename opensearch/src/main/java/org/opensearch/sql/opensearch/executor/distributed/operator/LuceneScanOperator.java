@@ -11,6 +11,13 @@ import java.util.Map;
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.StoredFields;
+import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreMode;
+import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.Weight;
 import org.apache.lucene.util.BytesRef;
 import org.opensearch.common.xcontent.XContentHelper;
 import org.opensearch.common.xcontent.XContentType;
@@ -25,10 +32,12 @@ import org.opensearch.sql.planner.distributed.split.Split;
 
 /**
  * Source operator that reads documents directly from Lucene via {@link
- * IndexShard#acquireSearcher(String)}. Iterates all segments and documents, reading {@code _source}
- * JSON and extracting requested fields.
+ * IndexShard#acquireSearcher(String)}.
  *
- * <p>Phase 5B implementation: reads all fields from _source (no doc values optimization).
+ * <p>Uses Lucene's Weight/Scorer pattern to iterate only documents matching the filter query. When
+ * no filter is provided, uses {@link MatchAllDocsQuery} to match all documents.
+ *
+ * <p>Reads {@code _source} JSON from stored fields and extracts requested field values.
  */
 @Log4j2
 public class LuceneScanOperator implements SourceOperator {
@@ -37,28 +46,48 @@ public class LuceneScanOperator implements SourceOperator {
   private final List<String> fieldNames;
   private final int batchSize;
   private final OperatorContext context;
+  private final Query luceneQuery;
 
   private Split split;
   private boolean noMoreSplits;
   private boolean finished;
   private Engine.Searcher engineSearcher;
 
-  // Iteration state across segments
+  // Weight/Scorer state for filtered iteration
   private List<LeafReaderContext> leaves;
   private int currentLeafIndex;
-  private int currentDocId;
-  private int currentLeafMaxDoc;
   private StoredFields currentStoredFields;
+  private Scorer currentScorer;
+  private DocIdSetIterator currentDocIdIterator;
 
+  /**
+   * Creates a LuceneScanOperator with a filter query merged into the scan.
+   *
+   * @param indexShard the shard to read from
+   * @param fieldNames fields to extract from _source
+   * @param batchSize rows per page batch
+   * @param context operator context
+   * @param luceneQuery the Lucene query for filtering (null means match all)
+   */
   public LuceneScanOperator(
-      IndexShard indexShard, List<String> fieldNames, int batchSize, OperatorContext context) {
+      IndexShard indexShard,
+      List<String> fieldNames,
+      int batchSize,
+      OperatorContext context,
+      Query luceneQuery) {
     this.indexShard = indexShard;
     this.fieldNames = fieldNames;
     this.batchSize = batchSize;
     this.context = context;
+    this.luceneQuery = luceneQuery != null ? luceneQuery : new MatchAllDocsQuery();
     this.finished = false;
     this.currentLeafIndex = 0;
-    this.currentDocId = 0;
+  }
+
+  /** Backward-compatible constructor that matches all documents. */
+  public LuceneScanOperator(
+      IndexShard indexShard, List<String> fieldNames, int batchSize, OperatorContext context) {
+    this(indexShard, fieldNames, batchSize, context, null);
   }
 
   @Override
@@ -78,36 +107,31 @@ public class LuceneScanOperator implements SourceOperator {
     }
 
     try {
-      // Lazy initialization: acquire searcher on first getOutput()
+      // Lazy initialization: acquire searcher and prepare Weight on first call
       if (engineSearcher == null) {
         engineSearcher = indexShard.acquireSearcher("distributed-pipeline");
         leaves = engineSearcher.getIndexReader().leaves();
-        if (!leaves.isEmpty()) {
-          advanceToLeaf(0);
-        } else {
+        if (leaves.isEmpty()) {
           finished = true;
           return null;
         }
+        advanceToLeaf(0);
       }
 
       PageBuilder builder = new PageBuilder(fieldNames.size());
       int rowsInBatch = 0;
 
       while (rowsInBatch < batchSize) {
-        // Check if we need to advance to the next leaf
-        while (currentDocId >= currentLeafMaxDoc) {
-          currentLeafIndex++;
-          if (currentLeafIndex >= leaves.size()) {
-            finished = true;
-            return builder.isEmpty() ? null : builder.build();
-          }
-          advanceToLeaf(currentLeafIndex);
+        // Advance to next matching doc
+        int docId = nextMatchingDoc();
+        if (docId == DocIdSetIterator.NO_MORE_DOCS) {
+          finished = true;
+          return builder.isEmpty() ? null : builder.build();
         }
 
         // Read the document's _source
-        org.apache.lucene.document.Document doc = currentStoredFields.document(currentDocId);
+        org.apache.lucene.document.Document doc = currentStoredFields.document(docId);
         BytesRef sourceBytes = doc.getBinaryValue("_source");
-        currentDocId++;
 
         if (sourceBytes == null) {
           continue;
@@ -133,11 +157,47 @@ public class LuceneScanOperator implements SourceOperator {
     }
   }
 
+  /**
+   * Returns the next matching document ID using the Weight/Scorer pattern. Advances across leaf
+   * readers (segments) as needed.
+   */
+  private int nextMatchingDoc() throws IOException {
+    while (currentLeafIndex < leaves.size()) {
+      if (currentDocIdIterator != null) {
+        int docId = currentDocIdIterator.nextDoc();
+        if (docId != DocIdSetIterator.NO_MORE_DOCS) {
+          return docId;
+        }
+      }
+      // Move to next leaf
+      currentLeafIndex++;
+      if (currentLeafIndex < leaves.size()) {
+        advanceToLeaf(currentLeafIndex);
+      }
+    }
+    return DocIdSetIterator.NO_MORE_DOCS;
+  }
+
+  /**
+   * Advances to the specified leaf (segment) and creates a Scorer for it. The Scorer uses the
+   * Lucene query to efficiently iterate only matching documents in that segment.
+   */
   private void advanceToLeaf(int leafIndex) throws IOException {
     LeafReaderContext leafCtx = leaves.get(leafIndex);
     currentStoredFields = leafCtx.reader().storedFields();
-    currentDocId = 0;
-    currentLeafMaxDoc = leafCtx.reader().maxDoc();
+
+    // Create Weight/Scorer for filtered iteration
+    IndexSearcher indexSearcher = new IndexSearcher(engineSearcher.getIndexReader());
+    Query rewritten = indexSearcher.rewrite(luceneQuery);
+    Weight weight = indexSearcher.createWeight(rewritten, ScoreMode.COMPLETE_NO_SCORES, 1.0f);
+
+    currentScorer = weight.scorer(leafCtx);
+    if (currentScorer != null) {
+      currentDocIdIterator = currentScorer.iterator();
+    } else {
+      // No matching docs in this segment
+      currentDocIdIterator = null;
+    }
   }
 
   @Override
