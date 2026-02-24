@@ -17,6 +17,7 @@ import lombok.extern.log4j.Log4j2;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.Filter;
+import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.core.TableScan;
@@ -129,25 +130,73 @@ public class DistributedQueryPlanner {
   private List<ExecutionStage> createExecutionStages(RelNodeAnalysis analysis) {
     List<ExecutionStage> stages = new ArrayList<>();
 
-    // Stage 1: Distributed scanning with filters and projections
-    ExecutionStage scanStage = createScanStage(analysis);
-    stages.add(scanStage);
+    if (analysis.hasJoin()) {
+      // Join query: create two SCAN stages (left + right) tagged with "side" property
+      ExecutionStage leftScanStage = createJoinScanStage(analysis.getLeftTableName(), "left");
+      stages.add(leftScanStage);
 
-    // Stage 2: Partial aggregation (if needed)
-    if (analysis.hasAggregation()) {
-      ExecutionStage processStage = createPartialAggregationStage(analysis, scanStage.getStageId());
-      stages.add(processStage);
+      ExecutionStage rightScanStage = createJoinScanStage(analysis.getRightTableName(), "right");
+      stages.add(rightScanStage);
 
-      // Stage 3: Final aggregation
-      ExecutionStage finalStage = createFinalAggregationStage(analysis, processStage.getStageId());
+      // Finalize stage depends on both scan stages
+      ExecutionStage finalStage =
+          createResultCollectionStage(
+              analysis, leftScanStage.getStageId(), rightScanStage.getStageId());
       stages.add(finalStage);
     } else {
-      // No aggregation - add finalize stage for result collection
-      ExecutionStage finalStage = createResultCollectionStage(analysis, scanStage.getStageId());
-      stages.add(finalStage);
+      // Stage 1: Distributed scanning with filters and projections
+      ExecutionStage scanStage = createScanStage(analysis);
+      stages.add(scanStage);
+
+      // Stage 2: Partial aggregation (if needed)
+      if (analysis.hasAggregation()) {
+        ExecutionStage processStage =
+            createPartialAggregationStage(analysis, scanStage.getStageId());
+        stages.add(processStage);
+
+        // Stage 3: Final aggregation
+        ExecutionStage finalStage =
+            createFinalAggregationStage(analysis, processStage.getStageId());
+        stages.add(finalStage);
+      } else {
+        // No aggregation - add finalize stage for result collection
+        ExecutionStage finalStage = createResultCollectionStage(analysis, scanStage.getStageId());
+        stages.add(finalStage);
+      }
     }
 
     return stages;
+  }
+
+  /** Creates a SCAN stage for one side of a join, tagged with "side" property. */
+  private ExecutionStage createJoinScanStage(String tableName, String side) {
+    String stageId = side + "-scan-stage-" + UUID.randomUUID().toString().substring(0, 8);
+
+    List<DataPartition> partitions = partitionDiscovery.discoverPartitions(tableName);
+
+    List<WorkUnit> workUnits =
+        partitions.stream()
+            .map(
+                partition -> {
+                  String workUnitId = side + "-scan-" + partition.getPartitionId();
+                  TaskOperator scanOperator =
+                      new LuceneScanOperator(
+                          workUnitId + "-op",
+                          TaskOperator.OperatorType.SCAN,
+                          Map.of(
+                              "indexName", partition.getIndexName(),
+                              "shardId", partition.getShardId(),
+                              "side", side));
+                  return WorkUnit.createScanUnit(
+                      workUnitId, partition, scanOperator, partition.getNodeId());
+                })
+            .collect(Collectors.toList());
+
+    log.debug("Created {} scan stage {} with {} work units", side, stageId, workUnits.size());
+
+    ExecutionStage stage = ExecutionStage.createScanStage(stageId, workUnits);
+    stage.setProperties(new HashMap<>(Map.of("side", side, "tableName", tableName)));
+    return stage;
   }
 
   /** Creates Stage 1: Distributed scanning with filters and projections. */
@@ -247,7 +296,8 @@ public class DistributedQueryPlanner {
   }
 
   /** Creates a result collection stage for non-aggregation queries. */
-  private ExecutionStage createResultCollectionStage(RelNodeAnalysis analysis, String scanStageId) {
+  private ExecutionStage createResultCollectionStage(
+      RelNodeAnalysis analysis, String... dependencyStageIds) {
     String stageId = "collect-stage-" + UUID.randomUUID().toString().substring(0, 8);
     String workUnitId = "collect-results";
 
@@ -258,16 +308,17 @@ public class DistributedQueryPlanner {
     operatorConfig.put("sortFields", analysis.getSortFields());
     operatorConfig.put("relNodeInfo", analysis.getRelNodeInfo());
 
+    List<String> deps = List.of(dependencyStageIds);
+
     TaskOperator collectOperator =
         new ResultCollectionOperator(
             workUnitId + "-op", TaskOperator.OperatorType.FINALIZE, operatorConfig);
 
-    WorkUnit collectWorkUnit =
-        WorkUnit.createFinalizeUnit(workUnitId, collectOperator, List.of(scanStageId));
+    WorkUnit collectWorkUnit = WorkUnit.createFinalizeUnit(workUnitId, collectOperator, deps);
 
     log.debug("Created result collection stage {}", stageId);
 
-    return ExecutionStage.createFinalizeStage(stageId, collectWorkUnit, List.of(scanStageId));
+    return ExecutionStage.createFinalizeStage(stageId, collectWorkUnit, deps);
   }
 
   /** Analyzer that extracts distributed execution information from RelNode trees. */
@@ -294,7 +345,9 @@ public class DistributedQueryPlanner {
     }
 
     private void analyzeNode(RelNode node, RelNodeAnalysis analysis, CalcitePlanContext context) {
-      if (node instanceof TableScan) {
+      if (node instanceof Join join) {
+        analyzeJoin(join, analysis);
+      } else if (node instanceof TableScan) {
         analyzeTableScan((TableScan) node, analysis);
       } else if (node instanceof Filter) {
         analyzeFilter((Filter) node, analysis);
@@ -313,6 +366,43 @@ public class DistributedQueryPlanner {
       for (RelNode input : node.getInputs()) {
         analyzeNode(input, analysis, context);
       }
+    }
+
+    private void analyzeJoin(Join join, RelNodeAnalysis analysis) {
+      analysis.setHasJoin(true);
+
+      // Extract left table name
+      String leftTable = findTableName(join.getLeft());
+      if (leftTable != null) {
+        analysis.setLeftTableName(leftTable);
+        // Set main table name from left side if not already set
+        if (analysis.getTableName() == null) {
+          analysis.setTableName(leftTable);
+        }
+      }
+
+      // Extract right table name
+      String rightTable = findTableName(join.getRight());
+      if (rightTable != null) {
+        analysis.setRightTableName(rightTable);
+      }
+
+      log.debug(
+          "Found join: type={}, left={}, right={}", join.getJoinType(), leftTable, rightTable);
+    }
+
+    private String findTableName(RelNode node) {
+      if (node instanceof TableScan tableScan) {
+        List<String> qualifiedName = tableScan.getTable().getQualifiedName();
+        return qualifiedName.get(qualifiedName.size() - 1);
+      }
+      for (RelNode input : node.getInputs()) {
+        String name = findTableName(input);
+        if (name != null) {
+          return name;
+        }
+      }
+      return null;
     }
 
     private void analyzeTableScan(TableScan tableScan, RelNodeAnalysis analysis) {
@@ -419,6 +509,9 @@ public class DistributedQueryPlanner {
     private List<String> filterConditions = new ArrayList<>();
     private Map<String, String> projections = new HashMap<>();
     private boolean hasAggregation = false;
+    private boolean hasJoin = false;
+    private String leftTableName;
+    private String rightTableName;
     private List<String> groupByFields = new ArrayList<>();
     private Map<String, String> aggregations = new HashMap<>();
     private List<String> sortFields = new ArrayList<>();
@@ -519,6 +612,30 @@ public class DistributedQueryPlanner {
 
     public Map<String, String> getRelNodeInfo() {
       return relNodeInfo;
+    }
+
+    public boolean hasJoin() {
+      return hasJoin;
+    }
+
+    public void setHasJoin(boolean hasJoin) {
+      this.hasJoin = hasJoin;
+    }
+
+    public String getLeftTableName() {
+      return leftTableName;
+    }
+
+    public void setLeftTableName(String leftTableName) {
+      this.leftTableName = leftTableName;
+    }
+
+    public String getRightTableName() {
+      return rightTableName;
+    }
+
+    public void setRightTableName(String rightTableName) {
+      this.rightTableName = rightTableName;
     }
   }
 

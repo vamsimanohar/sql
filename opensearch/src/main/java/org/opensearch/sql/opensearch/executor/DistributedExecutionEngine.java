@@ -8,12 +8,6 @@ package org.opensearch.sql.opensearch.executor;
 import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.core.Aggregate;
-import org.apache.calcite.rel.core.Join;
-import org.apache.calcite.rel.core.Project;
-import org.apache.calcite.rex.RexCall;
-import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.rex.RexOver;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -314,41 +308,16 @@ public class DistributedExecutionEngine implements ExecutionEngine {
    * Walks the logical RelNode tree to find operations that the distributed engine cannot handle.
    * Returns a description of the unsupported operation, or null if the plan is supported.
    *
-   * <p>The SSB-based distributed engine can only handle operations that OpenSearch's
-   * SearchSourceBuilder can express (scan, filter, projection, aggregation, sort, limit).
-   * Operations like joins, computed expressions (eval), and window functions (dedup) cannot be
-   * pushed into the SSB and would produce incorrect results if silently dropped.
+   * <p>All operations are now supported via coordinator-side Calcite execution: complex operations
+   * (aggregation, computed expressions, window functions) are executed by scanning raw data from
+   * data nodes and running the full Calcite plan on the coordinator. Simple operations (scan,
+   * filter, sort, limit, rename) use the fast operator pipeline path.
    */
   private String findUnsupportedOperation(RelNode node) {
-    // Join requires multi-table coordination the SSB engine can't express
-    if (node instanceof Join) {
-      return "Join";
-    }
-
-    // Aggregate requires partial/final aggregation not yet implemented
-    if (node instanceof Aggregate) {
-      return "Aggregate (stats/top/rare) — requires distributed aggregation";
-    }
-
-    // Check Project nodes for computed expressions (eval) and window functions (dedup)
-    if (node instanceof Project project) {
-      for (RexNode expr : project.getProjects()) {
-        if (expr instanceof RexOver) {
-          return "Window function (RexOver) — used by dedup";
-        }
-        if (expr instanceof RexCall) {
-          return "Computed expression (RexCall) — used by eval";
-        }
-      }
-    }
-
-    // Recurse into children
-    for (RelNode input : node.getInputs()) {
-      String found = findUnsupportedOperation(input);
-      if (found != null) {
-        return found;
-      }
-    }
+    // All operations supported:
+    // - Simple scan/filter/sort/limit/rename: operator pipeline (direct Lucene reads)
+    // - Joins: coordinator-side hash join with distributed table scans
+    // - Complex ops (stats, eval, dedup, etc.): coordinator-side Calcite execution
     return null;
   }
 
