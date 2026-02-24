@@ -8,6 +8,7 @@ package org.opensearch.sql.opensearch.executor;
 import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexNode;
@@ -311,23 +312,26 @@ public class DistributedExecutionEngine implements ExecutionEngine {
   /**
    * Walks the logical RelNode tree to find operations that the distributed engine cannot handle.
    * Returns a description of the unsupported operation, or null if the plan is supported.
+   *
+   * <p>The SSB-based distributed engine can only handle operations that OpenSearch's
+   * SearchSourceBuilder can express (scan, filter, projection, aggregation, sort, limit).
+   * Operations like joins, computed expressions (eval), and window functions (dedup) cannot be
+   * pushed into the SSB and would produce incorrect results if silently dropped.
    */
   private String findUnsupportedOperation(RelNode node) {
-    // Join: requires shuffle exchange (Phase 4)
-    if (node instanceof org.apache.calcite.rel.core.Join) {
-      return "JOIN (requires shuffle exchange)";
+    // Join requires multi-table coordination the SSB engine can't express
+    if (node instanceof Join) {
+      return "Join";
     }
 
-    // Project with computed expressions or window functions:
-    // Simple field references are pushed to SSB fetchSource, but computed expressions
-    // (eval) and window functions (dedup via ROW_NUMBER) are NOT pushed down.
+    // Check Project nodes for computed expressions (eval) and window functions (dedup)
     if (node instanceof Project project) {
       for (RexNode expr : project.getProjects()) {
         if (expr instanceof RexOver) {
-          return "window function (ROW_NUMBER/RANK in dedup)";
+          return "Window function (RexOver) — used by dedup";
         }
         if (expr instanceof RexCall) {
-          return "computed expression (eval)";
+          return "Computed expression (RexCall) — used by eval";
         }
       }
     }

@@ -51,6 +51,12 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
   /** SearchResponse from per-shard execution (Phase 1B). */
   private SearchResponse searchResponse;
 
+  /** Column names from operator pipeline execution (Phase 5B). */
+  private List<String> pipelineFieldNames;
+
+  /** Row data from operator pipeline execution (Phase 5B). */
+  private List<List<Object>> pipelineRows;
+
   /** Constructor with original fields for backward compatibility. */
   public ExecuteDistributedTaskResponse(
       List<Object> results,
@@ -77,6 +83,21 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
       this.searchResponse = new SearchResponse(in);
     }
 
+    // Deserialize operator pipeline results (Phase 5B)
+    if (in.readBoolean()) {
+      this.pipelineFieldNames = in.readStringList();
+      int rowCount = in.readVInt();
+      this.pipelineRows = new java.util.ArrayList<>(rowCount);
+      int colCount = this.pipelineFieldNames.size();
+      for (int i = 0; i < rowCount; i++) {
+        List<Object> row = new java.util.ArrayList<>(colCount);
+        for (int j = 0; j < colCount; j++) {
+          row.add(in.readGenericValue());
+        }
+        this.pipelineRows.add(row);
+      }
+    }
+
     // Generic results not serialized over transport
     this.results = List.of();
     this.executionStats = Map.of();
@@ -96,6 +117,20 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
     } else {
       out.writeBoolean(false);
     }
+
+    // Serialize operator pipeline results (Phase 5B)
+    if (pipelineFieldNames != null && pipelineRows != null) {
+      out.writeBoolean(true);
+      out.writeStringCollection(pipelineFieldNames);
+      out.writeVInt(pipelineRows.size());
+      for (List<Object> row : pipelineRows) {
+        for (Object value : row) {
+          out.writeGenericValue(value);
+        }
+      }
+    } else {
+      out.writeBoolean(false);
+    }
   }
 
   /** Creates a successful response with results. */
@@ -107,6 +142,16 @@ public class ExecuteDistributedTaskResponse extends ActionResponse {
   /** Creates a failure response with error information. */
   public static ExecuteDistributedTaskResponse failure(String nodeId, String errorMessage) {
     return new ExecuteDistributedTaskResponse(List.of(), Map.of(), nodeId, false, errorMessage);
+  }
+
+  /** Creates a successful response containing row data from operator pipeline (Phase 5B). */
+  public static ExecuteDistributedTaskResponse successWithRows(
+      String nodeId, List<String> fieldNames, List<List<Object>> rows) {
+    ExecuteDistributedTaskResponse resp =
+        new ExecuteDistributedTaskResponse(List.of(), Map.of(), nodeId, true, null);
+    resp.setPipelineFieldNames(fieldNames);
+    resp.setPipelineRows(rows);
+    return resp;
   }
 
   /** Creates a successful response containing a SearchResponse (Phase 1C). */

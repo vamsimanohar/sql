@@ -18,6 +18,8 @@ import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.indices.IndicesService;
+import org.opensearch.sql.opensearch.executor.distributed.pipeline.OperatorPipelineExecutor;
 import org.opensearch.sql.planner.distributed.TaskOperator;
 import org.opensearch.sql.planner.distributed.WorkUnit;
 import org.opensearch.tasks.Task;
@@ -51,13 +53,15 @@ public class TransportExecuteDistributedTaskAction
 
   private final ClusterService clusterService;
   private final Client client;
+  private final IndicesService indicesService;
 
   @Inject
   public TransportExecuteDistributedTaskAction(
       TransportService transportService,
       ActionFilters actionFilters,
       ClusterService clusterService,
-      Client client) {
+      Client client,
+      IndicesService indicesService) {
     super(
         ExecuteDistributedTaskAction.NAME,
         transportService,
@@ -65,6 +69,7 @@ public class TransportExecuteDistributedTaskAction
         ExecuteDistributedTaskRequest::new);
     this.clusterService = clusterService;
     this.client = client;
+    this.indicesService = indicesService;
   }
 
   @Override
@@ -76,6 +81,12 @@ public class TransportExecuteDistributedTaskAction
     String nodeId = clusterService.localNode().getId();
 
     try {
+      // Phase 5B: Operator pipeline execution (direct Lucene access)
+      if ("OPERATOR_PIPELINE".equals(request.getExecutionMode())) {
+        executeOperatorPipeline(request, nodeId, listener);
+        return;
+      }
+
       // Phase 1C: SearchSourceBuilder-based execution (transport from coordinator)
       if (request.getSearchSourceBuilder() != null) {
         executeSearchRequest(request, nodeId, listener);
@@ -152,6 +163,41 @@ public class TransportExecuteDistributedTaskAction
           ExecuteDistributedTaskResponse.failure(
               nodeId, "Critical execution error: " + e.getMessage());
       listener.onResponse(errorResponse);
+    }
+  }
+
+  /**
+   * Phase 5B: Executes operator pipeline on this data node. Uses direct Lucene access via
+   * LuceneScanOperator to read documents from assigned shards.
+   */
+  private void executeOperatorPipeline(
+      ExecuteDistributedTaskRequest request,
+      String nodeId,
+      ActionListener<ExecuteDistributedTaskResponse> listener) {
+
+    log.info(
+        "[Phase 5B] Executing operator pipeline on node: {} for index: {}, shards: {}",
+        nodeId,
+        request.getIndexName(),
+        request.getShardIds());
+
+    try {
+      OperatorPipelineExecutor.OperatorPipelineResult result =
+          OperatorPipelineExecutor.execute(indicesService, request);
+
+      log.info(
+          "[Phase 5B] Operator pipeline completed on node: {} - {} rows",
+          nodeId,
+          result.getRows().size());
+
+      listener.onResponse(
+          ExecuteDistributedTaskResponse.successWithRows(
+              nodeId, result.getFieldNames(), result.getRows()));
+    } catch (Exception e) {
+      log.error("[Phase 5B] Operator pipeline failed on node: {}", nodeId, e);
+      listener.onResponse(
+          ExecuteDistributedTaskResponse.failure(
+              nodeId, "Operator pipeline failed: " + e.getMessage()));
     }
   }
 

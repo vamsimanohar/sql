@@ -74,31 +74,9 @@ class DistributedTaskSchedulerTest {
     when(dataNodes.values()).thenReturn(List.of(dataNode1, dataNode2));
     when(discoveryNodes.getDataNodes()).thenReturn(dataNodes);
 
-    // Setup node resolution for transport (Phase 1C)
+    // Setup node resolution for transport
     when(discoveryNodes.get("node-1")).thenReturn(dataNode1);
     when(discoveryNodes.get("node-2")).thenReturn(dataNode2);
-  }
-
-  @Test
-  void should_execute_simple_distributed_plan() {
-    // Given
-    DistributedPhysicalPlan plan = createSimplePlan();
-    AtomicReference<QueryResponse> responseRef = new AtomicReference<>();
-
-    doAnswer(
-            invocation -> {
-              QueryResponse response = invocation.getArgument(0);
-              responseRef.set(response);
-              return null;
-            })
-        .when(responseListener)
-        .onResponse(any());
-
-    // When
-    scheduler.executeQuery(plan, responseListener);
-
-    // Then - Plan should be marked as executing
-    assertEquals(DistributedPhysicalPlan.PlanStatus.EXECUTING, plan.getStatus());
   }
 
   @Test
@@ -126,79 +104,40 @@ class DistributedTaskSchedulerTest {
   }
 
   @Test
-  void should_distribute_work_units_by_node_locality() {
-    // Given
-    DistributedPhysicalPlan plan = createPlanWithMultipleWorkUnits();
+  void should_fail_when_plan_has_no_relnode() {
+    // Given: Plan without a RelNode — operator pipeline requires it
+    DistributedPhysicalPlan plan = createSimplePlan();
+    AtomicReference<Exception> errorRef = new AtomicReference<>();
 
-    // Mock transport service to capture requests
-    // Note: In Phase 1, we'll just verify that the scheduler attempts to distribute work
-
-    // When
-    scheduler.executeQuery(plan, responseListener);
-
-    // Then - Should distribute work units based on data locality
-    List<ExecutionStage> stages = plan.getExecutionStages();
-    assertNotNull(stages);
-    assertTrue(stages.size() >= 1);
-
-    ExecutionStage firstStage = stages.get(0);
-    List<WorkUnit> workUnits = firstStage.getWorkUnits();
-    assertNotNull(workUnits);
-
-    // Verify work units are assigned to correct nodes
-    for (WorkUnit workUnit : workUnits) {
-      assertNotNull(workUnit.getAssignedNodeId());
-      assertTrue(
-          workUnit.getAssignedNodeId().equals("node-1")
-              || workUnit.getAssignedNodeId().equals("node-2"));
-    }
-  }
-
-  @Test
-  void should_handle_empty_work_units_gracefully() {
-    // Given
-    DistributedPhysicalPlan plan = createPlanWithEmptyStage();
+    doAnswer(
+            invocation -> {
+              Exception error = invocation.getArgument(0);
+              errorRef.set(error);
+              return null;
+            })
+        .when(responseListener)
+        .onFailure(any());
 
     // When
     scheduler.executeQuery(plan, responseListener);
 
-    // Then - Should not fail and should complete successfully
-    assertEquals(DistributedPhysicalPlan.PlanStatus.EXECUTING, plan.getStatus());
-  }
-
-  @Test
-  void should_clean_execution_state_between_queries() {
-    // Given
-    DistributedPhysicalPlan plan1 = createSimplePlan();
-    DistributedPhysicalPlan plan2 = createSimplePlan();
-
-    // When
-    scheduler.executeQuery(plan1, responseListener);
-    scheduler.executeQuery(plan2, responseListener);
-
-    // Then - Each execution should start with clean state
-    // This is verified by the successful execution of both plans
-    assertEquals(DistributedPhysicalPlan.PlanStatus.EXECUTING, plan1.getStatus());
-    assertEquals(DistributedPhysicalPlan.PlanStatus.EXECUTING, plan2.getStatus());
+    // Then — should fail because no RelNode
+    assertEquals(DistributedPhysicalPlan.PlanStatus.FAILED, plan.getStatus());
+    verify(responseListener, times(1)).onFailure(any());
   }
 
   @Test
   void should_shutdown_gracefully() {
-    // Given
-    DistributedPhysicalPlan plan = createSimplePlan();
-    scheduler.executeQuery(plan, responseListener);
-
     // When
     scheduler.shutdown();
 
     // Then - Should not throw exceptions
-    // Shutdown is successful if no exceptions are thrown
   }
 
   @Test
   @SuppressWarnings("unchecked")
   void should_group_shards_by_node_for_transport() {
-    // Given: Plan with work units assigned to different nodes
+    // Given: Plan with 4 shards across 2 nodes
     DistributedPhysicalPlan plan = createPlanWithMultiNodeShards();
 
     // Verify work units are grouped by node ID
@@ -217,52 +156,6 @@ class DistributedTaskSchedulerTest {
             .count();
     assertEquals(2, node1Count);
     assertEquals(2, node2Count);
-  }
-
-  @Test
-  @SuppressWarnings("unchecked")
-  void should_send_transport_requests_to_each_node() {
-    // Given: Plan with shards on two nodes - this tests that the scheduler
-    // calls transportService.sendRequest for transport-based execution.
-    // Note: Full transport test requires Calcite context; here we verify
-    // the scheduler handles transport infrastructure correctly.
-    DistributedPhysicalPlan plan = createPlanWithMultiNodeShards();
-
-    // When
-    scheduler.executeQuery(plan, responseListener);
-
-    // Then: Plan should be marked as executing (transport execution starts)
-    assertEquals(DistributedPhysicalPlan.PlanStatus.EXECUTING, plan.getStatus());
-  }
-
-  @Test
-  void should_accept_aggregation_plan_with_three_stages() {
-    // Given: Plan with 3 stages (SCAN → PROCESS → FINALIZE) — Phase 2 removes restriction
-    DistributedPhysicalPlan plan = createAggregationPlan();
-
-    // When
-    scheduler.executeQuery(plan, responseListener);
-
-    // Then: Plan should be marked as executing (not rejected with UnsupportedOperationException)
-    assertEquals(DistributedPhysicalPlan.PlanStatus.EXECUTING, plan.getStatus());
-  }
-
-  @Test
-  void should_accept_plan_with_process_stage() {
-    // Given: Plan with a PROCESS stage (partial aggregation)
-    DistributedPhysicalPlan plan = createAggregationPlan();
-
-    // Verify the plan has a PROCESS stage
-    boolean hasProcessStage =
-        plan.getExecutionStages().stream()
-            .anyMatch(stage -> stage.getStageType() == ExecutionStage.StageType.PROCESS);
-    assertTrue(hasProcessStage, "Plan should have a PROCESS stage");
-
-    // When
-    scheduler.executeQuery(plan, responseListener);
-
-    // Then: Should not throw UnsupportedOperationException
-    assertEquals(DistributedPhysicalPlan.PlanStatus.EXECUTING, plan.getStatus());
   }
 
   @Test
@@ -286,10 +179,6 @@ class DistributedTaskSchedulerTest {
   }
 
   private DistributedPhysicalPlan createAggregationPlan() {
-    // Create a 3-stage plan: SCAN → PROCESS → FINALIZE
-    // This simulates an aggregation query like: stats count() by gender
-
-    // Stage 1: SCAN with 2 shards across 2 nodes
     DataPartition p1 = DataPartition.createLucenePartition("0", "accounts", "node-1", 1024L);
     DataPartition p2 = DataPartition.createLucenePartition("1", "accounts", "node-2", 1024L);
 
@@ -309,7 +198,6 @@ class DistributedTaskSchedulerTest {
             2,
             ExecutionStage.DataExchangeType.NONE);
 
-    // Stage 2: PROCESS (partial aggregation)
     WorkUnit processWu1 =
         new WorkUnit(
             "partial-agg-0",
@@ -340,7 +228,6 @@ class DistributedTaskSchedulerTest {
             2,
             ExecutionStage.DataExchangeType.NONE);
 
-    // Stage 3: FINALIZE (merge aggregation results)
     WorkUnit finalWu =
         new WorkUnit(
             "final-agg",
@@ -367,7 +254,6 @@ class DistributedTaskSchedulerTest {
   }
 
   private DistributedPhysicalPlan createPlanWithMultiNodeShards() {
-    // Create plan with 4 shards across 2 nodes
     DataPartition p1 = DataPartition.createLucenePartition("0", "test-index", "node-1", 1024L);
     DataPartition p2 = DataPartition.createLucenePartition("1", "test-index", "node-1", 1024L);
     DataPartition p3 = DataPartition.createLucenePartition("2", "test-index", "node-2", 2048L);
@@ -397,25 +283,18 @@ class DistributedTaskSchedulerTest {
   }
 
   private DistributedPhysicalPlan createSimplePlan() {
-    // Create a valid plan with one stage and one work unit
     DataPartition partition =
         new DataPartition("shard-1", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
     WorkUnit workUnit =
         new WorkUnit(
-            "work-1",
-            WorkUnit.WorkUnitType.SCAN,
-            partition,
-            null, // No operator for test
-            List.of(),
-            "node-1",
-            Map.of());
+            "work-1", WorkUnit.WorkUnitType.SCAN, partition, null, List.of(), "node-1", Map.of());
 
     ExecutionStage stage =
         new ExecutionStage(
             "stage-1",
             ExecutionStage.StageType.SCAN,
             List.of(workUnit),
-            List.of(), // No dependencies
+            List.of(),
             ExecutionStage.StageStatus.WAITING,
             Map.of(),
             1,
@@ -425,51 +304,6 @@ class DistributedTaskSchedulerTest {
   }
 
   private DistributedPhysicalPlan createInvalidPlan() {
-    // Create a plan that will fail validation
-    return DistributedPhysicalPlan.create(null, List.of(), null); // Invalid plan with null ID
-  }
-
-  private DistributedPhysicalPlan createPlanWithMultipleWorkUnits() {
-    // Create a plan with work units assigned to different nodes
-    DataPartition partition1 =
-        new DataPartition("shard-1", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
-    DataPartition partition2 =
-        new DataPartition("shard-2", DataPartition.StorageType.LUCENE, "index-1", 1024L, Map.of());
-
-    WorkUnit workUnit1 =
-        new WorkUnit(
-            "work-1", WorkUnit.WorkUnitType.SCAN, partition1, null, List.of(), "node-1", Map.of());
-    WorkUnit workUnit2 =
-        new WorkUnit(
-            "work-2", WorkUnit.WorkUnitType.SCAN, partition2, null, List.of(), "node-2", Map.of());
-
-    ExecutionStage stage =
-        new ExecutionStage(
-            "stage-1",
-            ExecutionStage.StageType.SCAN,
-            List.of(workUnit1, workUnit2),
-            List.of(),
-            ExecutionStage.StageStatus.WAITING,
-            Map.of(),
-            2,
-            ExecutionStage.DataExchangeType.GATHER);
-
-    return DistributedPhysicalPlan.create("test-plan", List.of(stage), null);
-  }
-
-  private DistributedPhysicalPlan createPlanWithEmptyStage() {
-    // Create a plan with an empty stage (no work units)
-    ExecutionStage emptyStage =
-        new ExecutionStage(
-            "empty-stage",
-            ExecutionStage.StageType.FINALIZE,
-            List.of(), // Empty work units
-            List.of(),
-            ExecutionStage.StageStatus.WAITING,
-            Map.of(),
-            0,
-            ExecutionStage.DataExchangeType.GATHER);
-
-    return DistributedPhysicalPlan.create("empty-plan", List.of(emptyStage), null);
+    return DistributedPhysicalPlan.create(null, List.of(), null);
   }
 }

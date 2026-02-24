@@ -33,6 +33,7 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.indices.IndicesService;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.SearchHits;
 import org.opensearch.search.builder.SearchSourceBuilder;
@@ -51,6 +52,7 @@ class TransportExecuteDistributedTaskActionTest {
   @Mock private ClusterService clusterService;
   @Mock private ActionFilters actionFilters;
   @Mock private Client client;
+  @Mock private IndicesService indicesService;
   @Mock private Task task;
   @Mock private ActionListener<ExecuteDistributedTaskResponse> actionListener;
 
@@ -60,7 +62,7 @@ class TransportExecuteDistributedTaskActionTest {
   void setUp() {
     action =
         new TransportExecuteDistributedTaskAction(
-            transportService, actionFilters, clusterService, client);
+            transportService, actionFilters, clusterService, client, indicesService);
 
     // Setup cluster service mock
     DiscoveryNode localNode = mock(DiscoveryNode.class);

@@ -52,6 +52,15 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
   /** Shard IDs to execute on the target node (Phase 1B). */
   private List<Integer> shardIds;
 
+  /** Execution mode: "SSB" (default) or "OPERATOR_PIPELINE" (Phase 5B). */
+  private String executionMode;
+
+  /** Fields to return when using operator pipeline mode (Phase 5B). */
+  private List<String> fieldNames;
+
+  /** Row limit when using operator pipeline mode (Phase 5B). */
+  private int queryLimit;
+
   /** Constructor with original fields for backward compatibility. */
   public ExecuteDistributedTaskRequest(List<WorkUnit> workUnits, String stageId, Object inputData) {
     this.workUnits = workUnits;
@@ -78,6 +87,13 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
         this.shardIds.add(in.readVInt());
       }
     }
+
+    // Deserialize operator pipeline fields (Phase 5B)
+    this.executionMode = in.readOptionalString();
+    if (in.readBoolean()) {
+      this.fieldNames = in.readStringList();
+    }
+    this.queryLimit = in.readVInt();
 
     // WorkUnit and inputData are not serialized over transport (used locally only)
     this.workUnits = List.of();
@@ -109,6 +125,16 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
     } else {
       out.writeBoolean(false);
     }
+
+    // Serialize operator pipeline fields (Phase 5B)
+    out.writeOptionalString(executionMode);
+    if (fieldNames != null) {
+      out.writeBoolean(true);
+      out.writeStringCollection(fieldNames);
+    } else {
+      out.writeBoolean(false);
+    }
+    out.writeVInt(queryLimit);
   }
 
   /**
@@ -118,6 +144,16 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
    * @return true if request is valid for execution
    */
   public boolean isValid() {
+    // Phase 5B: Operator pipeline request
+    if ("OPERATOR_PIPELINE".equals(executionMode)) {
+      return indexName != null
+          && !indexName.isEmpty()
+          && shardIds != null
+          && !shardIds.isEmpty()
+          && fieldNames != null
+          && !fieldNames.isEmpty()
+          && queryLimit > 0;
+    }
     // Phase 1C: SSB-based request
     if (searchSourceBuilder != null) {
       return indexName != null && !indexName.isEmpty() && shardIds != null && !shardIds.isEmpty();
@@ -133,6 +169,28 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
 
   @Override
   public ActionRequestValidationException validate() {
+    // Phase 5B: Operator pipeline request
+    if ("OPERATOR_PIPELINE".equals(executionMode)) {
+      ActionRequestValidationException validationException = null;
+      if (indexName == null || indexName.trim().isEmpty()) {
+        validationException = new ActionRequestValidationException();
+        validationException.addValidationError("Index name cannot be null or empty");
+      }
+      if (shardIds == null || shardIds.isEmpty()) {
+        if (validationException == null) {
+          validationException = new ActionRequestValidationException();
+        }
+        validationException.addValidationError("Shard IDs cannot be null or empty");
+      }
+      if (fieldNames == null || fieldNames.isEmpty()) {
+        if (validationException == null) {
+          validationException = new ActionRequestValidationException();
+        }
+        validationException.addValidationError("Field names cannot be null or empty");
+      }
+      return validationException;
+    }
+
     // Phase 1C: SSB-based request requires index + shards
     if (searchSourceBuilder != null) {
       ActionRequestValidationException validationException = null;
@@ -170,7 +228,8 @@ public class ExecuteDistributedTaskRequest extends ActionRequest {
   @Override
   public String toString() {
     return String.format(
-        "ExecuteDistributedTaskRequest{stageId='%s', workUnits=%d, index='%s', shards=%s}",
-        stageId, getWorkUnitCount(), indexName, shardIds);
+        "ExecuteDistributedTaskRequest{stageId='%s', workUnits=%d, index='%s', shards=%s,"
+            + " mode='%s'}",
+        stageId, getWorkUnitCount(), indexName, shardIds, executionMode);
   }
 }
