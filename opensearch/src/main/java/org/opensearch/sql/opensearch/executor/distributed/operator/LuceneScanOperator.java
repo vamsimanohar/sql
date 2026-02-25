@@ -24,11 +24,11 @@ import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.index.engine.Engine;
 import org.opensearch.index.shard.IndexShard;
+import org.opensearch.sql.planner.distributed.dataunit.DataUnit;
 import org.opensearch.sql.planner.distributed.operator.OperatorContext;
 import org.opensearch.sql.planner.distributed.operator.SourceOperator;
 import org.opensearch.sql.planner.distributed.page.Page;
 import org.opensearch.sql.planner.distributed.page.PageBuilder;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 /**
  * Source operator that reads documents directly from Lucene via {@link

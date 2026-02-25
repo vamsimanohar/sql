@@ -5,8 +5,8 @@
 
 package org.opensearch.sql.planner.distributed.operator;
 
+import org.opensearch.sql.planner.distributed.dataunit.DataUnit;
 import org.opensearch.sql.planner.distributed.page.Page;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 /**
  * A source operator that reads data from external storage (e.g., Lucene shards). Source operators

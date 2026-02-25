@@ -16,13 +16,7 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
-import org.opensearch.sql.planner.distributed.operator.Operator;
-import org.opensearch.sql.planner.distributed.operator.OperatorContext;
-import org.opensearch.sql.planner.distributed.operator.OperatorFactory;
-import org.opensearch.sql.planner.distributed.operator.SourceOperator;
-import org.opensearch.sql.planner.distributed.operator.SourceOperatorFactory;
-import org.opensearch.sql.planner.distributed.page.Page;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
+import org.opensearch.sql.planner.distributed.dataunit.DataUnit;
 
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class ComputeStageTest {
@@ -34,19 +28,11 @@ class ComputeStageTest {
 
     ComputeStage stage =
         new ComputeStage(
-            "stage-0",
-            new NoOpSourceFactory(),
-            List.of(),
-            PartitioningScheme.gather(),
-            List.of(),
-            List.of(du1, du2),
-            95000L,
-            0L);
+            "stage-0", PartitioningScheme.gather(), List.of(), List.of(du1, du2), 95000L, 0L);
 
     assertEquals("stage-0", stage.getStageId());
     assertTrue(stage.isLeaf());
     assertEquals(2, stage.getDataUnits().size());
-    assertEquals(1, stage.getOperatorCount());
     assertEquals(ExchangeType.GATHER, stage.getOutputPartitioning().getExchangeType());
     assertEquals(95000L, stage.getEstimatedRows());
   }
@@ -55,18 +41,10 @@ class ComputeStageTest {
   void should_create_non_leaf_stage_with_dependencies() {
     ComputeStage stage =
         new ComputeStage(
-            "stage-1",
-            new NoOpSourceFactory(),
-            List.of(new NoOpOperatorFactory()),
-            PartitioningScheme.none(),
-            List.of("stage-0"),
-            List.of(),
-            0L,
-            0L);
+            "stage-1", PartitioningScheme.none(), List.of("stage-0"), List.of(), 0L, 0L);
 
     assertFalse(stage.isLeaf());
     assertEquals(List.of("stage-0"), stage.getSourceStageIds());
-    assertEquals(2, stage.getOperatorCount());
   }
 
   @Test
@@ -74,8 +52,6 @@ class ComputeStageTest {
     ComputeStage scan =
         new ComputeStage(
             "scan",
-            new NoOpSourceFactory(),
-            List.of(),
             PartitioningScheme.gather(),
             List.of(),
             List.of(new TestDataUnit("idx/0", List.of("n1"), 1000L)),
@@ -83,15 +59,7 @@ class ComputeStageTest {
             0L);
 
     ComputeStage merge =
-        new ComputeStage(
-            "merge",
-            new NoOpSourceFactory(),
-            List.of(),
-            PartitioningScheme.none(),
-            List.of("scan"),
-            List.of(),
-            1000L,
-            0L);
+        new ComputeStage("merge", PartitioningScheme.none(), List.of("scan"), List.of(), 1000L, 0L);
 
     StagedPlan plan = new StagedPlan("plan-1", List.of(scan, merge));
 
@@ -108,15 +76,7 @@ class ComputeStageTest {
         new StagedPlan(
             "p1",
             List.of(
-                new ComputeStage(
-                    "s1",
-                    new NoOpSourceFactory(),
-                    List.of(),
-                    PartitioningScheme.gather(),
-                    List.of(),
-                    List.of(),
-                    0L,
-                    0L)));
+                new ComputeStage("s1", PartitioningScheme.gather(), List.of(), List.of(), 0L, 0L)));
 
     assertTrue(validPlan.validate().isEmpty());
   }
@@ -137,29 +97,14 @@ class ComputeStageTest {
             "p1",
             List.of(
                 new ComputeStage(
-                    "s1",
-                    new NoOpSourceFactory(),
-                    List.of(),
-                    PartitioningScheme.none(),
-                    List.of("nonexistent"),
-                    List.of(),
-                    0L,
-                    0L)));
+                    "s1", PartitioningScheme.none(), List.of("nonexistent"), List.of(), 0L, 0L)));
     assertFalse(badRef.validate().isEmpty());
   }
 
   @Test
   void should_lookup_stage_by_id() {
     ComputeStage s1 =
-        new ComputeStage(
-            "s1",
-            new NoOpSourceFactory(),
-            List.of(),
-            PartitioningScheme.gather(),
-            List.of(),
-            List.of(),
-            0L,
-            0L);
+        new ComputeStage("s1", PartitioningScheme.gather(), List.of(), List.of(), 0L, 0L);
     StagedPlan plan = new StagedPlan("p1", List.of(s1));
 
     assertEquals("s1", plan.getStage("s1").getStageId());
@@ -219,83 +164,5 @@ class ComputeStageTest {
     public Map<String, String> getProperties() {
       return Collections.emptyMap();
     }
-  }
-
-  /** No-op source factory for testing. */
-  static class NoOpSourceFactory implements SourceOperatorFactory {
-    @Override
-    public SourceOperator createOperator(OperatorContext context) {
-      return new SourceOperator() {
-        @Override
-        public void addDataUnit(DataUnit dataUnit) {}
-
-        @Override
-        public void noMoreDataUnits() {}
-
-        @Override
-        public Page getOutput() {
-          return null;
-        }
-
-        @Override
-        public boolean isFinished() {
-          return true;
-        }
-
-        @Override
-        public void finish() {}
-
-        @Override
-        public OperatorContext getContext() {
-          return context;
-        }
-
-        @Override
-        public void close() {}
-      };
-    }
-
-    @Override
-    public void noMoreOperators() {}
-  }
-
-  /** No-op operator factory for testing. */
-  static class NoOpOperatorFactory implements OperatorFactory {
-    @Override
-    public Operator createOperator(OperatorContext context) {
-      return new Operator() {
-        @Override
-        public boolean needsInput() {
-          return false;
-        }
-
-        @Override
-        public void addInput(Page page) {}
-
-        @Override
-        public Page getOutput() {
-          return null;
-        }
-
-        @Override
-        public boolean isFinished() {
-          return true;
-        }
-
-        @Override
-        public void finish() {}
-
-        @Override
-        public OperatorContext getContext() {
-          return context;
-        }
-
-        @Override
-        public void close() {}
-      };
-    }
-
-    @Override
-    public void noMoreOperators() {}
   }
 }

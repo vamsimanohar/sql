@@ -8,14 +8,12 @@ package org.opensearch.sql.planner.distributed.stage;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.rel.RelNode;
-import org.opensearch.sql.planner.distributed.operator.OperatorFactory;
-import org.opensearch.sql.planner.distributed.operator.SourceOperatorFactory;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
+import org.opensearch.sql.planner.distributed.dataunit.DataUnit;
 
 /**
  * A portion of the distributed plan that runs as a pipeline on one or more nodes. Each ComputeStage
- * contains a pipeline of operators (source + transforms), an output partitioning scheme (how
- * results flow to the next stage), and metadata about dependencies and parallelism.
+ * contains an output partitioning scheme (how results flow to the next stage), and metadata about
+ * dependencies and parallelism.
  *
  * <p>Naming follows the convention: "ComputeStage" (not "Fragment") — a unit of distributed
  * computation.
@@ -23,8 +21,6 @@ import org.opensearch.sql.planner.distributed.split.DataUnit;
 public class ComputeStage {
 
   private final String stageId;
-  private final SourceOperatorFactory sourceFactory;
-  private final List<OperatorFactory> operatorFactories;
   private final PartitioningScheme outputPartitioning;
   private final List<String> sourceStageIds;
   private final List<DataUnit> dataUnits;
@@ -34,8 +30,6 @@ public class ComputeStage {
 
   public ComputeStage(
       String stageId,
-      SourceOperatorFactory sourceFactory,
-      List<OperatorFactory> operatorFactories,
       PartitioningScheme outputPartitioning,
       List<String> sourceStageIds,
       List<DataUnit> dataUnits,
@@ -43,8 +37,6 @@ public class ComputeStage {
       long estimatedBytes) {
     this(
         stageId,
-        sourceFactory,
-        operatorFactories,
         outputPartitioning,
         sourceStageIds,
         dataUnits,
@@ -55,8 +47,6 @@ public class ComputeStage {
 
   public ComputeStage(
       String stageId,
-      SourceOperatorFactory sourceFactory,
-      List<OperatorFactory> operatorFactories,
       PartitioningScheme outputPartitioning,
       List<String> sourceStageIds,
       List<DataUnit> dataUnits,
@@ -64,8 +54,6 @@ public class ComputeStage {
       long estimatedBytes,
       RelNode planFragment) {
     this.stageId = stageId;
-    this.sourceFactory = sourceFactory;
-    this.operatorFactories = Collections.unmodifiableList(operatorFactories);
     this.outputPartitioning = outputPartitioning;
     this.sourceStageIds = Collections.unmodifiableList(sourceStageIds);
     this.dataUnits = Collections.unmodifiableList(dataUnits);
@@ -76,15 +64,6 @@ public class ComputeStage {
 
   public String getStageId() {
     return stageId;
-  }
-
-  public SourceOperatorFactory getSourceFactory() {
-    return sourceFactory;
-  }
-
-  /** Returns the ordered list of intermediate operator factories (after source). */
-  public List<OperatorFactory> getOperatorFactories() {
-    return operatorFactories;
   }
 
   /** Returns how this stage's output is partitioned for the downstream stage. */
@@ -126,19 +105,12 @@ public class ComputeStage {
     return sourceStageIds.isEmpty();
   }
 
-  /** Returns the total operator count (source + intermediates). */
-  public int getOperatorCount() {
-    return 1 + operatorFactories.size();
-  }
-
   @Override
   public String toString() {
     return "ComputeStage{"
         + "id='"
         + stageId
-        + "', operators="
-        + getOperatorCount()
-        + ", exchange="
+        + "', exchange="
         + outputPartitioning.getExchangeType()
         + ", dataUnits="
         + dataUnits.size()
