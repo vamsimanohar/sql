@@ -28,7 +28,7 @@ import org.opensearch.sql.planner.distributed.operator.OperatorContext;
 import org.opensearch.sql.planner.distributed.operator.SourceOperator;
 import org.opensearch.sql.planner.distributed.page.Page;
 import org.opensearch.sql.planner.distributed.page.PageBuilder;
-import org.opensearch.sql.planner.distributed.split.Split;
+import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 /**
  * Source operator that reads documents directly from Lucene via {@link
@@ -48,8 +48,8 @@ public class LuceneScanOperator implements SourceOperator {
   private final OperatorContext context;
   private final Query luceneQuery;
 
-  private Split split;
-  private boolean noMoreSplits;
+  private DataUnit dataUnit;
+  private boolean noMoreDataUnits;
   private boolean finished;
   private Engine.Searcher engineSearcher;
 
@@ -92,13 +92,13 @@ public class LuceneScanOperator implements SourceOperator {
   }
 
   @Override
-  public void addSplit(Split split) {
-    this.split = split;
+  public void addDataUnit(DataUnit dataUnit) {
+    this.dataUnit = dataUnit;
   }
 
   @Override
-  public void noMoreSplits() {
-    this.noMoreSplits = true;
+  public void noMoreDataUnits() {
+    this.noMoreDataUnits = true;
   }
 
   @Override

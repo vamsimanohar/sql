@@ -24,9 +24,6 @@ public class CalcitePPLNestedAggregationIT extends PPLIntegTestCase {
   public void init() throws Exception {
     super.init();
     enableCalcite();
-    // Distributed engine reads parent _source which contains nested arrays inline.
-    // Nested aggregation counts parent docs, not nested sub-documents.
-    org.junit.Assume.assumeFalse(isDistributedEnabled());
 
     loadIndex(Index.NESTED_SIMPLE);
   }

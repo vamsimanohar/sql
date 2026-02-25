@@ -6,27 +6,27 @@
 package org.opensearch.sql.planner.distributed.operator;
 
 import org.opensearch.sql.planner.distributed.page.Page;
-import org.opensearch.sql.planner.distributed.split.Split;
+import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 /**
  * A source operator that reads data from external storage (e.g., Lucene shards). Source operators
- * do not accept input from upstream operators — they produce data from assigned {@link Split}s.
+ * do not accept input from upstream operators — they produce data from assigned {@link DataUnit}s.
  *
- * <p>The pipeline driver assigns splits via {@link #addSplit(Split)} and signals completion via
- * {@link #noMoreSplits()}. The operator reads data from splits and produces {@link Page} batches
- * via {@link #getOutput()}.
+ * <p>The pipeline driver assigns data units via {@link #addDataUnit(DataUnit)} and signals
+ * completion via {@link #noMoreDataUnits()}. The operator reads data from data units and produces
+ * {@link Page} batches via {@link #getOutput()}.
  */
 public interface SourceOperator extends Operator {
 
   /**
    * Assigns a unit of work (e.g., a shard) to this source operator.
    *
-   * @param split the split to read from
+   * @param dataUnit the data unit to read from
    */
-  void addSplit(Split split);
+  void addDataUnit(DataUnit dataUnit);
 
-  /** Signals that no more splits will be assigned. */
-  void noMoreSplits();
+  /** Signals that no more data units will be assigned. */
+  void noMoreDataUnits();
 
   /** Source operators never accept input from upstream. */
   @Override

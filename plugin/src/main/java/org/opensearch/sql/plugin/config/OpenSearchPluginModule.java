@@ -39,7 +39,6 @@ import org.opensearch.sql.ppl.antlr.PPLSyntaxParser;
 import org.opensearch.sql.sql.SQLService;
 import org.opensearch.sql.sql.antlr.SQLSyntaxParser;
 import org.opensearch.sql.storage.StorageEngine;
-import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.node.NodeClient;
 
 @RequiredArgsConstructor
@@ -66,21 +65,14 @@ public class OpenSearchPluginModule extends AbstractModule {
       OpenSearchClient client,
       ExecutionProtector protector,
       PlanSerializer planSerializer,
-      Settings settings,
-      ClusterService clusterService,
-      TransportService transportService,
-      NodeClient nodeClient) {
-    // Create legacy engine as dependency for distributed engine
+      ClusterService clusterService) {
     OpenSearchExecutionEngine legacyEngine =
         new OpenSearchExecutionEngine(client, protector, planSerializer);
 
-    // Convert ClusterService to OpenSearchSettings
     OpenSearchSettings openSearchSettings =
         new OpenSearchSettings(clusterService.getClusterSettings());
 
-    // Phase 1B: Pass NodeClient for per-shard search execution
-    return new DistributedExecutionEngine(
-        legacyEngine, openSearchSettings, clusterService, transportService, nodeClient);
+    return new DistributedExecutionEngine(legacyEngine, openSearchSettings);
   }
 
   @Provides

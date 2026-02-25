@@ -154,7 +154,7 @@ public class OpenSearchSettings extends Settings {
   public static final Setting<?> PPL_DISTRIBUTED_ENABLED_SETTING =
       Setting.boolSetting(
           Key.PPL_DISTRIBUTED_ENABLED.getKeyValue(),
-          true,
+          false,
           Setting.Property.NodeScope,
           Setting.Property.Dynamic);
 

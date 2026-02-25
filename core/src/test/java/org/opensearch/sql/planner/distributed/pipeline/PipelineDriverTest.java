@@ -18,7 +18,7 @@ import org.opensearch.sql.planner.distributed.operator.OperatorContext;
 import org.opensearch.sql.planner.distributed.operator.SourceOperator;
 import org.opensearch.sql.planner.distributed.page.Page;
 import org.opensearch.sql.planner.distributed.page.PageBuilder;
-import org.opensearch.sql.planner.distributed.split.Split;
+import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class PipelineDriverTest {
@@ -115,10 +115,10 @@ class PipelineDriverTest {
     }
 
     @Override
-    public void addSplit(Split split) {}
+    public void addDataUnit(DataUnit dataUnit) {}
 
     @Override
-    public void noMoreSplits() {}
+    public void noMoreDataUnits() {}
 
     @Override
     public Page getOutput() {

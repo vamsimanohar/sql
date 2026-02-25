@@ -178,8 +178,6 @@ public class CalcitePPLAppendCommandIT extends PPLIntegTestCase {
 
   @Test
   public void testAppendDifferentIndex() throws IOException {
-    // Distributed engine: append with different indices requires separate scan stage resolution
-    org.junit.Assume.assumeFalse(isDistributedEnabled());
     JSONObject actual =
         executeQuery(
             String.format(
@@ -261,8 +259,6 @@ public class CalcitePPLAppendCommandIT extends PPLIntegTestCase {
 
   @Test
   public void testAppendSchemaMergeWithIpUDT() throws IOException {
-    // Distributed engine: IP values from _source are strings, Calcite IP UDFs expect ExprIpValue
-    org.junit.Assume.assumeFalse(isDistributedEnabled());
     JSONObject actual =
         executeQuery(
             String.format(

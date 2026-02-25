@@ -10,7 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
@@ -20,15 +22,15 @@ import org.opensearch.sql.planner.distributed.operator.OperatorFactory;
 import org.opensearch.sql.planner.distributed.operator.SourceOperator;
 import org.opensearch.sql.planner.distributed.operator.SourceOperatorFactory;
 import org.opensearch.sql.planner.distributed.page.Page;
-import org.opensearch.sql.planner.distributed.split.Split;
+import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class ComputeStageTest {
 
   @Test
-  void should_create_leaf_stage_with_splits() {
-    Split split1 = new Split("accounts", 0, List.of("node-1", "node-2"), 50000L);
-    Split split2 = new Split("accounts", 1, List.of("node-2", "node-3"), 45000L);
+  void should_create_leaf_stage_with_data_units() {
+    DataUnit du1 = new TestDataUnit("accounts/0", List.of("node-1", "node-2"), 50000L);
+    DataUnit du2 = new TestDataUnit("accounts/1", List.of("node-2", "node-3"), 45000L);
 
     ComputeStage stage =
         new ComputeStage(
@@ -37,13 +39,13 @@ class ComputeStageTest {
             List.of(),
             PartitioningScheme.gather(),
             List.of(),
-            List.of(split1, split2),
+            List.of(du1, du2),
             95000L,
             0L);
 
     assertEquals("stage-0", stage.getStageId());
     assertTrue(stage.isLeaf());
-    assertEquals(2, stage.getSplits().size());
+    assertEquals(2, stage.getDataUnits().size());
     assertEquals(1, stage.getOperatorCount());
     assertEquals(ExchangeType.GATHER, stage.getOutputPartitioning().getExchangeType());
     assertEquals(95000L, stage.getEstimatedRows());
@@ -76,7 +78,7 @@ class ComputeStageTest {
             List.of(),
             PartitioningScheme.gather(),
             List.of(),
-            List.of(new Split("idx", 0, List.of("n1"), 1000L)),
+            List.of(new TestDataUnit("idx/0", List.of("n1"), 1000L)),
             1000L,
             0L);
 
@@ -181,16 +183,54 @@ class ComputeStageTest {
     assertEquals(ExchangeType.NONE, none.getExchangeType());
   }
 
+  /** Minimal test stub for DataUnit. */
+  static class TestDataUnit extends DataUnit {
+    private final String id;
+    private final List<String> preferredNodes;
+    private final long estimatedRows;
+
+    TestDataUnit(String id, List<String> preferredNodes, long estimatedRows) {
+      this.id = id;
+      this.preferredNodes = preferredNodes;
+      this.estimatedRows = estimatedRows;
+    }
+
+    @Override
+    public String getDataUnitId() {
+      return id;
+    }
+
+    @Override
+    public List<String> getPreferredNodes() {
+      return preferredNodes;
+    }
+
+    @Override
+    public long getEstimatedRows() {
+      return estimatedRows;
+    }
+
+    @Override
+    public long getEstimatedSizeBytes() {
+      return 0;
+    }
+
+    @Override
+    public Map<String, String> getProperties() {
+      return Collections.emptyMap();
+    }
+  }
+
   /** No-op source factory for testing. */
   static class NoOpSourceFactory implements SourceOperatorFactory {
     @Override
     public SourceOperator createOperator(OperatorContext context) {
       return new SourceOperator() {
         @Override
-        public void addSplit(Split split) {}
+        public void addDataUnit(DataUnit dataUnit) {}
 
         @Override
-        public void noMoreSplits() {}
+        public void noMoreDataUnits() {}
 
         @Override
         public Page getOutput() {

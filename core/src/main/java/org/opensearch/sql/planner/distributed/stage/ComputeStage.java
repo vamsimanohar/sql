@@ -7,9 +7,10 @@ package org.opensearch.sql.planner.distributed.stage;
 
 import java.util.Collections;
 import java.util.List;
+import org.apache.calcite.rel.RelNode;
 import org.opensearch.sql.planner.distributed.operator.OperatorFactory;
 import org.opensearch.sql.planner.distributed.operator.SourceOperatorFactory;
-import org.opensearch.sql.planner.distributed.split.Split;
+import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 /**
  * A portion of the distributed plan that runs as a pipeline on one or more nodes. Each ComputeStage
@@ -26,9 +27,10 @@ public class ComputeStage {
   private final List<OperatorFactory> operatorFactories;
   private final PartitioningScheme outputPartitioning;
   private final List<String> sourceStageIds;
-  private final List<Split> splits;
+  private final List<DataUnit> dataUnits;
   private final long estimatedRows;
   private final long estimatedBytes;
+  private final RelNode planFragment;
 
   public ComputeStage(
       String stageId,
@@ -36,17 +38,40 @@ public class ComputeStage {
       List<OperatorFactory> operatorFactories,
       PartitioningScheme outputPartitioning,
       List<String> sourceStageIds,
-      List<Split> splits,
+      List<DataUnit> dataUnits,
       long estimatedRows,
       long estimatedBytes) {
+    this(
+        stageId,
+        sourceFactory,
+        operatorFactories,
+        outputPartitioning,
+        sourceStageIds,
+        dataUnits,
+        estimatedRows,
+        estimatedBytes,
+        null);
+  }
+
+  public ComputeStage(
+      String stageId,
+      SourceOperatorFactory sourceFactory,
+      List<OperatorFactory> operatorFactories,
+      PartitioningScheme outputPartitioning,
+      List<String> sourceStageIds,
+      List<DataUnit> dataUnits,
+      long estimatedRows,
+      long estimatedBytes,
+      RelNode planFragment) {
     this.stageId = stageId;
     this.sourceFactory = sourceFactory;
     this.operatorFactories = Collections.unmodifiableList(operatorFactories);
     this.outputPartitioning = outputPartitioning;
     this.sourceStageIds = Collections.unmodifiableList(sourceStageIds);
-    this.splits = Collections.unmodifiableList(splits);
+    this.dataUnits = Collections.unmodifiableList(dataUnits);
     this.estimatedRows = estimatedRows;
     this.estimatedBytes = estimatedBytes;
+    this.planFragment = planFragment;
   }
 
   public String getStageId() {
@@ -72,9 +97,9 @@ public class ComputeStage {
     return sourceStageIds;
   }
 
-  /** Returns the splits assigned to this stage (for source stages with shard assignments). */
-  public List<Split> getSplits() {
-    return splits;
+  /** Returns the data units assigned to this stage (for source stages with shard assignments). */
+  public List<DataUnit> getDataUnits() {
+    return dataUnits;
   }
 
   /** Returns the estimated row count for this stage's output. */
@@ -85,6 +110,15 @@ public class ComputeStage {
   /** Returns the estimated byte size for this stage's output. */
   public long getEstimatedBytes() {
     return estimatedBytes;
+  }
+
+  /**
+   * Returns the sub-plan (Calcite RelNode) for data node execution, or null if this stage does not
+   * push down a plan fragment. Enables query pushdown: the data node can execute this sub-plan
+   * locally instead of just scanning raw data.
+   */
+  public RelNode getPlanFragment() {
+    return planFragment;
   }
 
   /** Returns true if this is a leaf stage (no upstream dependencies). */
@@ -106,8 +140,8 @@ public class ComputeStage {
         + getOperatorCount()
         + ", exchange="
         + outputPartitioning.getExchangeType()
-        + ", splits="
-        + splits.size()
+        + ", dataUnits="
+        + dataUnits.size()
         + ", deps="
         + sourceStageIds
         + '}';

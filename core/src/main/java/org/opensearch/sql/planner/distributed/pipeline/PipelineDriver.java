@@ -14,7 +14,7 @@ import org.opensearch.sql.planner.distributed.operator.OperatorContext;
 import org.opensearch.sql.planner.distributed.operator.OperatorFactory;
 import org.opensearch.sql.planner.distributed.operator.SourceOperator;
 import org.opensearch.sql.planner.distributed.page.Page;
-import org.opensearch.sql.planner.distributed.split.Split;
+import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 /**
  * Executes a pipeline by driving data through a chain of operators. The driver implements a
@@ -24,7 +24,7 @@ import org.opensearch.sql.planner.distributed.split.Split;
  * <p>Execution model:
  *
  * <ol>
- *   <li>Source operator produces pages from splits
+ *   <li>Source operator produces pages from data units
  *   <li>Each intermediate operator transforms pages
  *   <li>The last operator (or sink) consumes the final output
  *   <li>When all operators are finished, the pipeline is complete
@@ -43,17 +43,18 @@ public class PipelineDriver {
    *
    * @param pipeline the pipeline to execute
    * @param operatorContext the context for creating operators
-   * @param splits the splits to assign to the source operator
+   * @param dataUnits the data units to assign to the source operator
    */
-  public PipelineDriver(Pipeline pipeline, OperatorContext operatorContext, List<Split> splits) {
+  public PipelineDriver(
+      Pipeline pipeline, OperatorContext operatorContext, List<DataUnit> dataUnits) {
     this.context = new PipelineContext();
 
     // Create source operator
     this.sourceOperator = pipeline.getSourceFactory().createOperator(operatorContext);
-    for (Split split : splits) {
-      this.sourceOperator.addSplit(split);
+    for (DataUnit dataUnit : dataUnits) {
+      this.sourceOperator.addDataUnit(dataUnit);
     }
-    this.sourceOperator.noMoreSplits();
+    this.sourceOperator.noMoreDataUnits();
 
     // Create intermediate operators
     this.operators = new ArrayList<>();

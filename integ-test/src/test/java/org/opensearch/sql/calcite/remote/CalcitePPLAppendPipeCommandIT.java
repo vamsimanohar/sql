@@ -43,8 +43,6 @@ public class CalcitePPLAppendPipeCommandIT extends PPLIntegTestCase {
 
   @Test
   public void testAppendDifferentIndex() throws IOException {
-    // Distributed engine: append with different indices requires separate scan stage resolution
-    org.junit.Assume.assumeFalse(isDistributedEnabled());
     JSONObject actual =
         executeQuery(
             String.format(

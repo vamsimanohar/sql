@@ -36,6 +36,27 @@ public interface Page {
    */
   Page getRegion(int positionOffset, int length);
 
+  /**
+   * Returns the columnar block for the given channel. Default implementation throws
+   * UnsupportedOperationException; columnar Page implementations (e.g., Arrow-backed) override
+   * this.
+   *
+   * @param channel the column index (0-based)
+   * @return the block for the channel
+   */
+  default Block getBlock(int channel) {
+    throw new UnsupportedOperationException(
+        "Columnar access not supported by " + getClass().getSimpleName());
+  }
+
+  /**
+   * Returns the estimated memory retained by this page in bytes. Default implementation estimates
+   * based on position count, channel count, and 8 bytes per value.
+   */
+  default long getRetainedSizeBytes() {
+    return (long) getPositionCount() * getChannelCount() * 8L;
+  }
+
   /** Returns an empty page with zero rows and the given number of columns. */
   static Page empty(int channelCount) {
     return new RowPage(new Object[0][channelCount], channelCount);

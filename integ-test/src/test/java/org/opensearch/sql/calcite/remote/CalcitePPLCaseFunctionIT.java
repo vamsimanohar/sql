@@ -259,8 +259,6 @@ public class CalcitePPLCaseFunctionIT extends PPLIntegTestCase {
 
   @Test
   public void testCaseCanBePushedDownAsRangeQuery() throws IOException {
-    // Distributed engine: CASE function null handling edge case
-    org.junit.Assume.assumeFalse(isDistributedEnabled());
     // CASE 1: Range - Metric
     // 1.1 Range - Metric
     JSONObject actual1 =
@@ -452,8 +450,6 @@ public class CalcitePPLCaseFunctionIT extends PPLIntegTestCase {
 
   @Test
   public void testCaseAggWithNullValues() throws IOException {
-    // Distributed engine: CASE function null handling edge case in aggregation
-    org.junit.Assume.assumeFalse(isDistributedEnabled());
     JSONObject actual =
         executeQuery(
             String.format(
@@ -481,8 +477,6 @@ public class CalcitePPLCaseFunctionIT extends PPLIntegTestCase {
 
   @Test
   public void testNestedCaseAggWithAutoDateHistogram() throws IOException {
-    // Distributed engine: auto_date_histogram requires date math that is not supported
-    org.junit.Assume.assumeFalse(isDistributedEnabled());
     // TODO: Remove after resolving: https://github.com/opensearch-project/sql/issues/4578
     Assume.assumeFalse(
         "The query cannot be executed when pushdown is disabled due to implementation defects of"
