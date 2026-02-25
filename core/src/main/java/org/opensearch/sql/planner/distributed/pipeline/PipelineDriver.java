@@ -164,6 +164,18 @@ public class PipelineDriver {
       }
     }
 
+    // Drain the last operator's output so it can transition to finished.
+    // Without this, operators that buffer pages (e.g., PassThroughOperator)
+    // would never have getOutput() called, preventing isFinished() from
+    // returning true.
+    if (!operators.isEmpty()) {
+      Operator last = operators.get(operators.size() - 1);
+      Page output = last.getOutput();
+      if (output != null) {
+        madeProgress = true;
+      }
+    }
+
     return madeProgress;
   }
 
