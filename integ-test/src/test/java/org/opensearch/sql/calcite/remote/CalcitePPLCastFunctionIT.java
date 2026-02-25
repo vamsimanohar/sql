@@ -196,4 +196,10 @@ public class CalcitePPLCastFunctionIT extends CastFunctionIT {
         rows("1.2.3.5"),
         rows("::ffff:1234"));
   }
+
+  @Override
+  @Test
+  public void testCastToIP() throws IOException {
+    super.testCastToIP();
+  }
 }
