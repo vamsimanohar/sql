@@ -19,8 +19,11 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
+import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.logical.LogicalSort;
@@ -32,6 +35,7 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeFactoryImpl;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.util.ImmutableBitSet;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
@@ -210,6 +214,45 @@ class RelNodeAnalyzerTest {
     LogicalFilter filter = LogicalFilter.create(scan, orCond);
 
     assertThrows(UnsupportedOperationException.class, () -> RelNodeAnalyzer.analyze(filter));
+  }
+
+  @Test
+  void should_reject_aggregation() {
+    RelNode scan = createMockScan("accounts", rowType);
+    // stats count() by age → LogicalAggregate
+    LogicalAggregate aggregate =
+        LogicalAggregate.create(scan, List.of(), ImmutableBitSet.of(1), null, List.of());
+
+    UnsupportedOperationException ex =
+        assertThrows(UnsupportedOperationException.class, () -> RelNodeAnalyzer.analyze(aggregate));
+    assert ex.getMessage().contains("Aggregation");
+  }
+
+  @Test
+  void should_reject_sort_with_collation() {
+    RelNode scan = createMockScan("accounts", rowType);
+    // sort age → LogicalSort with collation on field 1 (age)
+    RelCollation collation =
+        RelCollations.of(new RelFieldCollation(1, RelFieldCollation.Direction.ASCENDING));
+    LogicalSort sort = LogicalSort.create(scan, collation, null, null);
+
+    UnsupportedOperationException ex =
+        assertThrows(UnsupportedOperationException.class, () -> RelNodeAnalyzer.analyze(sort));
+    assert ex.getMessage().contains("Sort");
+  }
+
+  @Test
+  void should_reject_sort_with_collation_and_limit() {
+    RelNode scan = createMockScan("accounts", rowType);
+    // sort age | head 5 → LogicalSort with collation AND fetch
+    RelCollation collation =
+        RelCollations.of(new RelFieldCollation(1, RelFieldCollation.Direction.ASCENDING));
+    RexNode fetch = rexBuilder.makeExactLiteral(BigDecimal.valueOf(5));
+    LogicalSort sort = LogicalSort.create(scan, collation, null, fetch);
+
+    UnsupportedOperationException ex =
+        assertThrows(UnsupportedOperationException.class, () -> RelNodeAnalyzer.analyze(sort));
+    assert ex.getMessage().contains("Sort");
   }
 
   @Test

@@ -10,7 +10,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.TableScan;
+import org.apache.calcite.rel.core.Window;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.logical.LogicalSort;
@@ -94,6 +96,12 @@ public class RelNodeAnalyzer {
     while (current != null) {
       if (current instanceof LogicalSort) {
         LogicalSort sort = (LogicalSort) current;
+        // Reject sort with ordering collation — distributed pipeline cannot apply sort
+        if (!sort.getCollation().getFieldCollations().isEmpty()) {
+          throw new UnsupportedOperationException(
+              "Sort (ORDER BY) not supported in distributed execution. "
+                  + "Supported: scan, filter, limit, project, and combinations.");
+        }
         if (sort.fetch != null) {
           queryLimit = extractLimit(sort.fetch);
         }
@@ -121,8 +129,15 @@ public class RelNodeAnalyzer {
           fieldNames.add(field.getName());
         }
         current = null;
+      } else if (current instanceof Aggregate) {
+        throw new UnsupportedOperationException(
+            "Aggregation (stats) not supported in distributed execution. "
+                + "Supported: scan, filter, limit, project, and combinations.");
+      } else if (current instanceof Window) {
+        throw new UnsupportedOperationException(
+            "Window functions not supported in distributed execution.");
       } else if (current.getInputs().size() == 1) {
-        // Single-input node we don't recognize — skip through
+        // Single-input node we don't recognize (e.g., system limit) — skip through
         current = current.getInput(0);
       } else if (current.getInputs().isEmpty()) {
         // Leaf node we don't recognize
