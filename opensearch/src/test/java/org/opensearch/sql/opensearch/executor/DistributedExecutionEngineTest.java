@@ -7,6 +7,7 @@ package org.opensearch.sql.opensearch.executor;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -22,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.sql.ast.statement.ExplainMode;
 import org.opensearch.sql.calcite.CalcitePlanContext;
 import org.opensearch.sql.common.response.ResponseListener;
@@ -30,6 +32,7 @@ import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.executor.ExecutionEngine.QueryResponse;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
+import org.opensearch.transport.TransportService;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -38,6 +41,8 @@ class DistributedExecutionEngineTest {
 
   @Mock private OpenSearchExecutionEngine legacyEngine;
   @Mock private OpenSearchSettings settings;
+  @Mock private ClusterService clusterService;
+  @Mock private TransportService transportService;
   @Mock private PhysicalPlan physicalPlan;
   @Mock private RelNode relNode;
   @Mock private CalcitePlanContext calciteContext;
@@ -48,7 +53,8 @@ class DistributedExecutionEngineTest {
 
   @BeforeEach
   void setUp() {
-    distributedEngine = new DistributedExecutionEngine(legacyEngine, settings);
+    distributedEngine =
+        new DistributedExecutionEngine(legacyEngine, settings, clusterService, transportService);
   }
 
   @Test
@@ -70,12 +76,15 @@ class DistributedExecutionEngineTest {
   }
 
   @Test
-  void should_throw_when_distributed_enabled_for_calcite_relnode() {
+  void should_report_failure_when_distributed_enabled_with_invalid_relnode() {
     when(settings.getDistributedExecutionEnabled()).thenReturn(true);
+    // Mock RelNode with no inputs and not an AbstractCalciteIndexScan — will fail analysis
+    when(relNode.getInputs()).thenReturn(java.util.List.of());
 
-    assertThrows(
-        UnsupportedOperationException.class,
-        () -> distributedEngine.execute(relNode, calciteContext, responseListener));
+    distributedEngine.execute(relNode, calciteContext, responseListener);
+
+    // Should call onFailure since the mock RelNode can't be analyzed
+    verify(responseListener, times(1)).onFailure(any(Exception.class));
   }
 
   @Test
@@ -112,21 +121,24 @@ class DistributedExecutionEngineTest {
   }
 
   @Test
-  void should_throw_for_calcite_explain_when_distributed_enabled() {
+  void should_report_failure_for_calcite_explain_when_distributed_enabled_with_invalid_relnode() {
     @SuppressWarnings("unchecked")
     ResponseListener<ExecutionEngine.ExplainResponse> explainListener =
         mock(ResponseListener.class);
     ExplainMode mode = ExplainMode.STANDARD;
     when(settings.getDistributedExecutionEnabled()).thenReturn(true);
+    when(relNode.getInputs()).thenReturn(java.util.List.of());
 
-    assertThrows(
-        UnsupportedOperationException.class,
-        () -> distributedEngine.explain(relNode, mode, calciteContext, explainListener));
+    distributedEngine.explain(relNode, mode, calciteContext, explainListener);
+
+    // Should call onFailure since the mock RelNode can't be analyzed
+    verify(explainListener, times(1)).onFailure(any(Exception.class));
   }
 
   @Test
   void constructor_should_initialize() {
-    DistributedExecutionEngine engine = new DistributedExecutionEngine(legacyEngine, settings);
+    DistributedExecutionEngine engine =
+        new DistributedExecutionEngine(legacyEngine, settings, clusterService, transportService);
     assertNotNull(engine);
   }
 }
