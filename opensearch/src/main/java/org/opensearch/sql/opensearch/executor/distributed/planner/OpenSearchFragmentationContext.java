@@ -22,9 +22,17 @@ import org.opensearch.sql.planner.distributed.planner.FragmentationContext;
 public class OpenSearchFragmentationContext implements FragmentationContext {
 
   private final ClusterService clusterService;
+  private final CostEstimator costEstimator;
 
   public OpenSearchFragmentationContext(ClusterService clusterService) {
     this.clusterService = clusterService;
+    this.costEstimator = createStubCostEstimator();
+  }
+
+  public OpenSearchFragmentationContext(
+      ClusterService clusterService, CostEstimator costEstimator) {
+    this.clusterService = clusterService;
+    this.costEstimator = costEstimator;
   }
 
   @Override
@@ -36,7 +44,14 @@ public class OpenSearchFragmentationContext implements FragmentationContext {
 
   @Override
   public CostEstimator getCostEstimator() {
-    // Stub cost estimator — returns -1 for all estimates
+    return costEstimator;
+  }
+
+  /**
+   * Creates a stub cost estimator that returns -1 for all estimates. Used when no enhanced cost
+   * estimator is provided.
+   */
+  private CostEstimator createStubCostEstimator() {
     return new CostEstimator() {
       @Override
       public long estimateRowCount(RelNode relNode) {

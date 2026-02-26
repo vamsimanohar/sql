@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.RelVisitor;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.core.Window;
@@ -25,8 +26,10 @@ import org.apache.calcite.sql.SqlKind;
 import org.opensearch.sql.opensearch.storage.scan.AbstractCalciteIndexScan;
 
 /**
- * Extracts query metadata from a Calcite RelNode tree. Walks the tree to find the index name, field
- * names, query limit, and filter conditions.
+ * Extracts query metadata from a Calcite RelNode tree using the visitor pattern.
+ *
+ * <p>Follows Calcite conventions by extending {@link RelVisitor} to properly traverse RelNode trees
+ * and extract query planning information.
  *
  * <p>Supported RelNode patterns:
  *
@@ -37,7 +40,7 @@ import org.opensearch.sql.opensearch.storage.scan.AbstractCalciteIndexScan;
  *   <li>{@link LogicalProject} - projected field names
  * </ul>
  */
-public class RelNodeAnalyzer {
+public class RelNodeAnalyzer extends RelVisitor {
 
   /** Result of analyzing a RelNode tree. */
   public static class AnalysisResult {
@@ -76,6 +79,13 @@ public class RelNodeAnalyzer {
     }
   }
 
+  // Analysis state accumulated during tree traversal
+  private String indexName;
+  private List<String> fieldNames;
+  private List<String> projectedFields;
+  private int queryLimit = -1;
+  private List<Map<String, Object>> filterConditions;
+
   /**
    * Analyzes a RelNode tree and extracts query metadata.
    *
@@ -84,89 +94,119 @@ public class RelNodeAnalyzer {
    * @throws UnsupportedOperationException if the tree contains unsupported operations
    */
   public static AnalysisResult analyze(RelNode relNode) {
-    String indexName = null;
-    List<String> fieldNames = null;
-    int queryLimit = -1;
-    List<Map<String, Object>> filterConditions = null;
+    RelNodeAnalyzer analyzer = new RelNodeAnalyzer();
+    analyzer.go(relNode);
+    return analyzer.buildResult();
+  }
 
-    // Walk tree from root to leaf
-    RelNode current = relNode;
-    List<String> projectedFields = null;
-
-    while (current != null) {
-      if (current instanceof LogicalSort) {
-        LogicalSort sort = (LogicalSort) current;
-        // Reject sort with ordering collation — distributed pipeline cannot apply sort
-        if (!sort.getCollation().getFieldCollations().isEmpty()) {
-          throw new UnsupportedOperationException(
-              "Sort (ORDER BY) not supported in distributed execution. "
-                  + "Supported: scan, filter, limit, project, and combinations.");
-        }
-        if (sort.fetch != null) {
-          queryLimit = extractLimit(sort.fetch);
-        }
-        current = sort.getInput();
-      } else if (current instanceof LogicalProject) {
-        LogicalProject project = (LogicalProject) current;
-        projectedFields = extractProjectedFields(project);
-        current = project.getInput();
-      } else if (current instanceof LogicalFilter) {
-        LogicalFilter filter = (LogicalFilter) current;
-        filterConditions = extractFilterConditions(filter.getCondition(), filter.getInput());
-        current = filter.getInput();
-      } else if (current instanceof AbstractCalciteIndexScan) {
-        AbstractCalciteIndexScan scan = (AbstractCalciteIndexScan) current;
-        indexName = extractIndexName(scan);
-        fieldNames = extractFieldNames(scan);
-        current = null;
-      } else if (current instanceof TableScan) {
-        // Generic table scan — extract from table qualified name
-        TableScan scan = (TableScan) current;
-        List<String> qualifiedName = scan.getTable().getQualifiedName();
-        indexName = qualifiedName.get(qualifiedName.size() - 1);
-        fieldNames = new ArrayList<>();
-        for (RelDataTypeField field : scan.getRowType().getFieldList()) {
-          fieldNames.add(field.getName());
-        }
-        current = null;
-      } else if (current instanceof Aggregate) {
-        throw new UnsupportedOperationException(
-            "Aggregation (stats) not supported in distributed execution. "
-                + "Supported: scan, filter, limit, project, and combinations.");
-      } else if (current instanceof Window) {
-        throw new UnsupportedOperationException(
-            "Window functions not supported in distributed execution.");
-      } else if (current.getInputs().size() == 1) {
-        // Single-input node we don't recognize (e.g., system limit) — skip through
-        current = current.getInput(0);
-      } else if (current.getInputs().isEmpty()) {
-        // Leaf node we don't recognize
-        throw new UnsupportedOperationException(
-            "Unsupported leaf node type: " + current.getClass().getSimpleName());
-      } else {
-        throw new UnsupportedOperationException(
-            "Multi-input nodes (joins) not supported: " + current.getClass().getSimpleName());
-      }
+  @Override
+  public void visit(RelNode node, int ordinal, RelNode parent) {
+    if (node instanceof LogicalSort) {
+      visitLogicalSort((LogicalSort) node, ordinal, parent);
+    } else if (node instanceof LogicalProject) {
+      visitLogicalProject((LogicalProject) node, ordinal, parent);
+    } else if (node instanceof LogicalFilter) {
+      visitLogicalFilter((LogicalFilter) node, ordinal, parent);
+    } else if (node instanceof AbstractCalciteIndexScan) {
+      visitAbstractCalciteIndexScan((AbstractCalciteIndexScan) node, ordinal, parent);
+    } else if (node instanceof TableScan) {
+      visitTableScan((TableScan) node, ordinal, parent);
+    } else if (node instanceof Aggregate) {
+      visitAggregate((Aggregate) node, ordinal, parent);
+    } else if (node instanceof Window) {
+      visitWindow((Window) node, ordinal, parent);
     }
 
+    // Always continue traversal to child nodes (for all node types)
+    super.visit(node, ordinal, parent);
+  }
+
+  /** Handles LogicalSort nodes - extracts limit information and validates sort operations. */
+  private void visitLogicalSort(LogicalSort sort, int ordinal, RelNode parent) {
+    // Reject sort with ordering collation — distributed pipeline cannot apply sort
+    if (!sort.getCollation().getFieldCollations().isEmpty()) {
+      throw new UnsupportedOperationException(
+          "Sort (ORDER BY) not supported in distributed execution. "
+              + "Supported: scan, filter, limit, project, and combinations.");
+    }
+
+    // Extract fetch (LIMIT) if present
+    if (sort.fetch != null) {
+      this.queryLimit = extractLimit(sort.fetch);
+    }
+
+    // Note: Child traversal handled by main visit() method
+  }
+
+  /** Handles LogicalProject nodes - extracts projected field names. */
+  private void visitLogicalProject(LogicalProject project, int ordinal, RelNode parent) {
+    this.projectedFields = extractProjectedFields(project);
+
+    // Note: Child traversal handled by main visit() method
+  }
+
+  /** Handles LogicalFilter nodes - extracts filter conditions. */
+  private void visitLogicalFilter(LogicalFilter filter, int ordinal, RelNode parent) {
+    this.filterConditions = extractFilterConditions(filter.getCondition(), filter.getInput());
+
+    // Note: Child traversal handled by main visit() method
+  }
+
+  /** Handles AbstractCalciteIndexScan nodes - extracts index name and field names. */
+  private void visitAbstractCalciteIndexScan(
+      AbstractCalciteIndexScan scan, int ordinal, RelNode parent) {
+    this.indexName = extractIndexName(scan);
+    this.fieldNames = extractFieldNames(scan);
+
+    // Leaf node - no further traversal needed
+  }
+
+  /** Handles generic TableScan nodes - extracts index name from qualified name. */
+  private void visitTableScan(TableScan scan, int ordinal, RelNode parent) {
+    List<String> qualifiedName = scan.getTable().getQualifiedName();
+    this.indexName = qualifiedName.get(qualifiedName.size() - 1);
+
+    this.fieldNames = new ArrayList<>();
+    for (RelDataTypeField field : scan.getRowType().getFieldList()) {
+      this.fieldNames.add(field.getName());
+    }
+
+    // Leaf node - no further traversal needed
+  }
+
+  /** Handles Aggregate nodes - rejects aggregation operations. */
+  private void visitAggregate(Aggregate aggregate, int ordinal, RelNode parent) {
+    throw new UnsupportedOperationException(
+        "Aggregation (stats) not supported in distributed execution. "
+            + "Supported: scan, filter, limit, project, and combinations.");
+  }
+
+  /** Handles Window nodes - rejects window function operations. */
+  private void visitWindow(Window window, int ordinal, RelNode parent) {
+    throw new UnsupportedOperationException(
+        "Window functions not supported in distributed execution.");
+  }
+
+  /** Builds the final analysis result from accumulated state. */
+  private AnalysisResult buildResult() {
     if (indexName == null) {
       throw new IllegalStateException("Could not extract index name from RelNode tree");
     }
 
     // Use projected fields if available, otherwise use scan fields
-    if (projectedFields != null) {
-      fieldNames = projectedFields;
-    }
+    List<String> finalFieldNames = projectedFields != null ? projectedFields : fieldNames;
 
-    return new AnalysisResult(indexName, fieldNames, queryLimit, filterConditions);
+    return new AnalysisResult(indexName, finalFieldNames, queryLimit, filterConditions);
   }
 
-  private static String extractIndexName(AbstractCalciteIndexScan scan) {
+  // =================== Helper Methods (unchanged) ===================
+
+  private String extractIndexName(AbstractCalciteIndexScan scan) {
     List<String> qualifiedName = scan.getTable().getQualifiedName();
     return qualifiedName.get(qualifiedName.size() - 1);
   }
 
-  private static List<String> extractFieldNames(AbstractCalciteIndexScan scan) {
+  private List<String> extractFieldNames(AbstractCalciteIndexScan scan) {
     List<String> names = new ArrayList<>();
     for (RelDataTypeField field : scan.getRowType().getFieldList()) {
       names.add(field.getName());
@@ -174,7 +214,7 @@ public class RelNodeAnalyzer {
     return names;
   }
 
-  private static int extractLimit(RexNode fetch) {
+  private int extractLimit(RexNode fetch) {
     if (fetch instanceof RexLiteral) {
       RexLiteral literal = (RexLiteral) fetch;
       return ((Number) literal.getValue()).intValue();
@@ -182,7 +222,7 @@ public class RelNodeAnalyzer {
     throw new UnsupportedOperationException("Non-literal LIMIT not supported: " + fetch);
   }
 
-  private static List<String> extractProjectedFields(LogicalProject project) {
+  private List<String> extractProjectedFields(LogicalProject project) {
     List<String> names = new ArrayList<>();
     List<RelDataTypeField> inputFields = project.getInput().getRowType().getFieldList();
 
@@ -204,14 +244,13 @@ public class RelNodeAnalyzer {
    * maps compatible with {@link
    * org.opensearch.sql.opensearch.executor.distributed.ExecuteDistributedTaskRequest}.
    */
-  private static List<Map<String, Object>> extractFilterConditions(
-      RexNode condition, RelNode input) {
+  private List<Map<String, Object>> extractFilterConditions(RexNode condition, RelNode input) {
     List<Map<String, Object>> conditions = new ArrayList<>();
     extractConditionsRecursive(condition, input, conditions);
     return conditions;
   }
 
-  private static void extractConditionsRecursive(
+  private void extractConditionsRecursive(
       RexNode node, RelNode input, List<Map<String, Object>> conditions) {
     if (node instanceof RexCall) {
       RexCall call = (RexCall) node;
@@ -233,7 +272,7 @@ public class RelNodeAnalyzer {
     }
   }
 
-  private static boolean isComparisonOp(SqlKind kind) {
+  private boolean isComparisonOp(SqlKind kind) {
     return kind == SqlKind.EQUALS
         || kind == SqlKind.NOT_EQUALS
         || kind == SqlKind.GREATER_THAN
@@ -242,7 +281,7 @@ public class RelNodeAnalyzer {
         || kind == SqlKind.LESS_THAN_OR_EQUAL;
   }
 
-  private static Map<String, Object> extractComparison(RexCall call, RelNode input) {
+  private Map<String, Object> extractComparison(RexCall call, RelNode input) {
     List<RexNode> operands = call.getOperands();
     if (operands.size() != 2) {
       return null;
@@ -275,11 +314,11 @@ public class RelNodeAnalyzer {
     return condition;
   }
 
-  private static String resolveFieldName(RexInputRef ref, RelNode input) {
+  private String resolveFieldName(RexInputRef ref, RelNode input) {
     return input.getRowType().getFieldList().get(ref.getIndex()).getName();
   }
 
-  private static Object extractLiteralValue(RexLiteral literal) {
+  private Object extractLiteralValue(RexLiteral literal) {
     Comparable<?> value = literal.getValue();
     if (value instanceof org.apache.calcite.util.NlsString) {
       return ((org.apache.calcite.util.NlsString) value).getValue();
@@ -303,7 +342,7 @@ public class RelNodeAnalyzer {
     return value;
   }
 
-  private static String sqlKindToOpString(SqlKind kind) {
+  private String sqlKindToOpString(SqlKind kind) {
     switch (kind) {
       case EQUALS:
         return "EQ";
@@ -322,7 +361,7 @@ public class RelNodeAnalyzer {
     }
   }
 
-  private static SqlKind reverseComparison(SqlKind kind) {
+  private SqlKind reverseComparison(SqlKind kind) {
     switch (kind) {
       case GREATER_THAN:
         return SqlKind.LESS_THAN;

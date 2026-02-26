@@ -16,11 +16,13 @@ import org.opensearch.sql.common.response.ResponseListener;
 import org.opensearch.sql.executor.ExecutionContext;
 import org.opensearch.sql.executor.ExecutionEngine;
 import org.opensearch.sql.opensearch.executor.distributed.DistributedQueryCoordinator;
+import org.opensearch.sql.opensearch.executor.distributed.planner.CalciteDistributedPhysicalPlanner;
+import org.opensearch.sql.opensearch.executor.distributed.planner.OpenSearchCostEstimator;
 import org.opensearch.sql.opensearch.executor.distributed.planner.OpenSearchFragmentationContext;
 import org.opensearch.sql.opensearch.executor.distributed.planner.RelNodeAnalyzer;
-import org.opensearch.sql.opensearch.executor.distributed.planner.SimplePlanFragmenter;
 import org.opensearch.sql.opensearch.setting.OpenSearchSettings;
 import org.opensearch.sql.planner.distributed.planner.FragmentationContext;
+import org.opensearch.sql.planner.distributed.planner.PhysicalPlanner;
 import org.opensearch.sql.planner.distributed.stage.ComputeStage;
 import org.opensearch.sql.planner.distributed.stage.StagedPlan;
 import org.opensearch.sql.planner.physical.PhysicalPlan;
@@ -99,18 +101,24 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
   private void executeDistributed(RelNode relNode, ResponseListener<QueryResponse> listener) {
     try {
-      RelNodeAnalyzer.AnalysisResult analysis = RelNodeAnalyzer.analyze(relNode);
-      FragmentationContext fragContext = new OpenSearchFragmentationContext(clusterService);
-      StagedPlan stagedPlan = new SimplePlanFragmenter().fragment(relNode, fragContext);
+      logger.info("Using distributed physical planner for execution");
 
-      logger.info(
-          "Distributed execute: index={}, stages={}, shards={}",
-          analysis.getIndexName(),
-          stagedPlan.getStageCount(),
-          stagedPlan.getLeafStages().get(0).getDataUnits().size());
+      // Step 1: Create physical planner with enhanced cost estimator
+      FragmentationContext fragContext = createEnhancedFragmentationContext();
+      PhysicalPlanner planner = new CalciteDistributedPhysicalPlanner(fragContext);
 
+      // Step 2: Generate staged plan using intelligent fragmentation
+      StagedPlan stagedPlan = planner.plan(relNode);
+
+      logger.info("Generated {} stages for distributed query", stagedPlan.getStageCount());
+
+      // Step 3: Execute via coordinator
       DistributedQueryCoordinator coordinator =
           new DistributedQueryCoordinator(clusterService, transportService);
+
+      // For Phase 1B, we still need the legacy analysis for compatibility
+      // Future phases will eliminate this dependency
+      RelNodeAnalyzer.AnalysisResult analysis = RelNodeAnalyzer.analyze(relNode);
       coordinator.execute(stagedPlan, analysis, relNode, listener);
 
     } catch (Exception e) {
@@ -121,31 +129,45 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
   private void explainDistributed(RelNode relNode, ResponseListener<ExplainResponse> listener) {
     try {
-      RelNodeAnalyzer.AnalysisResult analysis = RelNodeAnalyzer.analyze(relNode);
-      FragmentationContext fragContext = new OpenSearchFragmentationContext(clusterService);
-      StagedPlan stagedPlan = new SimplePlanFragmenter().fragment(relNode, fragContext);
+      // Generate staged plan using distributed physical planner
+      FragmentationContext fragContext = createEnhancedFragmentationContext();
+      PhysicalPlanner planner = new CalciteDistributedPhysicalPlanner(fragContext);
+      StagedPlan stagedPlan = planner.plan(relNode);
 
-      // Build explain output
+      // Build enhanced explain output
       StringBuilder sb = new StringBuilder();
       sb.append("Distributed Execution Plan\n");
       sb.append("==========================\n");
       sb.append("Plan ID: ").append(stagedPlan.getPlanId()).append("\n");
-      sb.append("Mode: Distributed\n");
+      sb.append("Mode: Distributed Physical Planning\n");
       sb.append("Stages: ").append(stagedPlan.getStageCount()).append("\n\n");
 
       for (ComputeStage stage : stagedPlan.getStages()) {
-        sb.append("[Stage ").append(stage.getStageId()).append("]\n");
-        sb.append("  Type: ").append(stage.isLeaf() ? "LEAF (scan)" : "ROOT (merge)").append("\n");
-        sb.append("  Exchange: ")
+        sb.append("[")
+            .append(stage.getStageId())
+            .append("] ")
             .append(stage.getOutputPartitioning().getExchangeType())
-            .append("\n");
-        sb.append("  DataUnits: ").append(stage.getDataUnits().size()).append("\n");
+            .append(" Exchange (parallelism: ")
+            .append(stage.getDataUnits().size())
+            .append(")\n");
+
+        if (stage.isLeaf()) {
+          sb.append("├─ LuceneScanOperator (shard-based data access)\n");
+          if (stage.getEstimatedRows() > 0) {
+            sb.append("├─ Estimated rows: ").append(stage.getEstimatedRows()).append("\n");
+          }
+          if (stage.getEstimatedBytes() > 0) {
+            sb.append("├─ Estimated bytes: ").append(stage.getEstimatedBytes()).append("\n");
+          }
+          sb.append("└─ Data units: ").append(stage.getDataUnits().size()).append(" shards\n");
+        } else {
+          sb.append("└─ CoordinatorMergeOperator (results aggregation)\n");
+        }
+
         if (!stage.getSourceStageIds().isEmpty()) {
-          sb.append("  Dependencies: ").append(stage.getSourceStageIds()).append("\n");
+          sb.append("   Dependencies: ").append(stage.getSourceStageIds()).append("\n");
         }
-        if (stage.getPlanFragment() != null) {
-          sb.append("  Plan: ").append(RelOptUtil.toString(stage.getPlanFragment())).append("\n");
-        }
+        sb.append("\n");
       }
 
       String logicalPlan = RelOptUtil.toString(relNode);
@@ -164,5 +186,14 @@ public class DistributedExecutionEngine implements ExecutionEngine {
 
   private boolean isDistributedEnabled() {
     return settings.getDistributedExecutionEnabled();
+  }
+
+  /** Creates an enhanced fragmentation context with real cost estimation. */
+  private FragmentationContext createEnhancedFragmentationContext() {
+    // Create enhanced cost estimator instead of stub
+    OpenSearchCostEstimator costEstimator = new OpenSearchCostEstimator(clusterService);
+
+    // Create fragmentation context with enhanced cost estimator
+    return new OpenSearchFragmentationContext(clusterService, costEstimator);
   }
 }
