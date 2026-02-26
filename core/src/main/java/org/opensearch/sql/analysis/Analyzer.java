@@ -73,6 +73,7 @@ import org.opensearch.sql.ast.tree.FetchCursor;
 import org.opensearch.sql.ast.tree.FillNull;
 import org.opensearch.sql.ast.tree.Filter;
 import org.opensearch.sql.ast.tree.Flatten;
+import org.opensearch.sql.ast.tree.GraphLookup;
 import org.opensearch.sql.ast.tree.Head;
 import org.opensearch.sql.ast.tree.Join;
 import org.opensearch.sql.ast.tree.Kmeans;
@@ -556,6 +557,11 @@ public class Analyzer extends AbstractNodeVisitor<LogicalPlan, AnalysisContext> 
   @Override
   public LogicalPlan visitMvExpand(MvExpand node, AnalysisContext context) {
     throw getOnlyForCalciteException("mvexpand");
+  }
+
+  @Override
+  public LogicalPlan visitGraphLookup(GraphLookup node, AnalysisContext context) {
+    throw getOnlyForCalciteException("graphlookup");
   }
 
   /** Build {@link ParseExpression} to context and skip to child nodes. */
