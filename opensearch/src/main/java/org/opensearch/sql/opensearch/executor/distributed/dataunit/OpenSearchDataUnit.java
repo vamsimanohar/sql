@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.sql.opensearch.executor.distributed.split;
+package org.opensearch.sql.opensearch.executor.distributed.dataunit;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
+import org.opensearch.sql.planner.distributed.dataunit.DataUnit;
 
 /**
  * An OpenSearch-specific data unit representing a single shard of an index. Requires local Lucene

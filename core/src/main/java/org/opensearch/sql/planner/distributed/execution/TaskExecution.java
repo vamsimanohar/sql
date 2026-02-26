@@ -6,7 +6,7 @@
 package org.opensearch.sql.planner.distributed.execution;
 
 import java.util.List;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
+import org.opensearch.sql.planner.distributed.dataunit.DataUnit;
 
 /**
  * Represents the execution of a single task within a stage. Each task processes a subset of data

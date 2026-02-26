@@ -13,12 +13,12 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
+import org.opensearch.sql.planner.distributed.dataunit.DataUnit;
 import org.opensearch.sql.planner.distributed.operator.Operator;
 import org.opensearch.sql.planner.distributed.operator.OperatorContext;
 import org.opensearch.sql.planner.distributed.operator.SourceOperator;
 import org.opensearch.sql.planner.distributed.page.Page;
 import org.opensearch.sql.planner.distributed.page.PageBuilder;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class PipelineDriverTest {

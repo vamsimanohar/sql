@@ -6,7 +6,7 @@
 package org.opensearch.sql.planner.distributed.planner;
 
 import java.util.List;
-import org.opensearch.sql.planner.distributed.split.DataUnitSource;
+import org.opensearch.sql.planner.distributed.dataunit.DataUnitSource;
 
 /**
  * Provides context to the {@link PlanFragmenter} during plan fragmentation. Supplies information

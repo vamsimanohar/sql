@@ -7,7 +7,7 @@ package org.opensearch.sql.planner.distributed.execution;
 
 import java.util.List;
 import java.util.Map;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
+import org.opensearch.sql.planner.distributed.dataunit.DataUnit;
 import org.opensearch.sql.planner.distributed.stage.ComputeStage;
 
 /**

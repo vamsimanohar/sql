@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.sql.planner.distributed.split;
+package org.opensearch.sql.planner.distributed.dataunit;
 
 import java.util.List;
 import java.util.Map;

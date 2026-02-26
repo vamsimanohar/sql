@@ -10,11 +10,8 @@ import java.util.List;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.sql.planner.distributed.operator.Operator;
-import org.opensearch.sql.planner.distributed.operator.OperatorContext;
-import org.opensearch.sql.planner.distributed.operator.OperatorFactory;
 import org.opensearch.sql.planner.distributed.operator.SourceOperator;
 import org.opensearch.sql.planner.distributed.page.Page;
-import org.opensearch.sql.planner.distributed.split.DataUnit;
 
 /**
  * Executes a pipeline by driving data through a chain of operators. The driver implements a
@@ -39,32 +36,7 @@ public class PipelineDriver {
   private final PipelineContext context;
 
   /**
-   * Creates a PipelineDriver from a Pipeline definition.
-   *
-   * @param pipeline the pipeline to execute
-   * @param operatorContext the context for creating operators
-   * @param dataUnits the data units to assign to the source operator
-   */
-  public PipelineDriver(
-      Pipeline pipeline, OperatorContext operatorContext, List<DataUnit> dataUnits) {
-    this.context = new PipelineContext();
-
-    // Create source operator
-    this.sourceOperator = pipeline.getSourceFactory().createOperator(operatorContext);
-    for (DataUnit dataUnit : dataUnits) {
-      this.sourceOperator.addDataUnit(dataUnit);
-    }
-    this.sourceOperator.noMoreDataUnits();
-
-    // Create intermediate operators
-    this.operators = new ArrayList<>();
-    for (OperatorFactory factory : pipeline.getOperatorFactories()) {
-      this.operators.add(factory.createOperator(operatorContext));
-    }
-  }
-
-  /**
-   * Creates a PipelineDriver from pre-built operators (for testing).
+   * Creates a PipelineDriver from pre-built operators.
    *
    * @param sourceOperator the source operator
    * @param operators the intermediate operators
